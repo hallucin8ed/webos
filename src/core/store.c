@@ -124,3 +124,9 @@ int cache_file(const char *key, long maxAge, char *p, size_t cap) {
   return !(maxAge > 0 && time(NULL) - st.st_mtime > maxAge);
 }
 
+
+/* another profile's data, before anything of the first was handed out (screens/gate.c chose Kids) */
+void store_switch(const char *dataDir) {
+  store_flush(); if (root) cJSON_Delete(root); root = NULL; ixStale = 1; serial++; dirty = 0;
+  mkdir(dataDir, 0755); store_init(dataDir);
+}

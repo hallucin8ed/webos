@@ -1,3 +1,4 @@
+#include "core/profile.h"
 #include "core/sync.h"
 #include "core/app.h"
 #include "core/i18n.h"
@@ -12,7 +13,7 @@ static int rebuildWanted; static double rebuildSince;
 
 /* events are watched here, not taken: the frame loop still sees all of them */
 static int SDLCALL on_event(void *ud, SDL_Event *e) {
-  (void)ud; int l = plat_lifecycle(e);
+  (void)ud; int l = plat_lifecycle(e); profile_life(l);
   if (l > 0) { away = 0; resumed = 1; } else if (l < 0) away = 1;
   return 0;
 }

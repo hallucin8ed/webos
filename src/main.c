@@ -95,6 +95,8 @@ static int vsyncOn __attribute__((unused));   /* SB_VSYNC=1: let the driver wait
 #include "screens/search.h"
 #include "screens/settings.h"
 #include "screens/splash.h"
+#include "core/profile.h"
+#include "screens/gate.h"
 #include "screens/player.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "stb_image_write.h"
@@ -197,6 +199,7 @@ int main(int argc, char **argv) {
     else { SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, cfg == 1 ? 0 : 8); } }
   SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0); SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
   store_init(plat_data_dir()); /* before the window: the drawing size is a setting */
+  profile_init(plat_data_dir());
   int memMb = plat_mem_total_mb();
   int w, h; Uint32 flags; plat_window_size(&w, &h, &flags);
   { /* always the TV's own resolution (a saved "uiRes" from older versions is ignored); SB_RES=720 draws at 1280x720
@@ -236,6 +239,14 @@ int main(int argc, char **argv) {
 #endif
   /* data + the services */
   char p[1100]; snprintf(p, sizeof p, "%s/cacert.pem", plat_asset_dir()); net_init(p);
+  i18n_init(plat_asset_dir(), getenv("SB_LANG") ? getenv("SB_LANG") : store_get("uiLang", "auto")); /* SB_LANG=ar: development */
+  if (!text_init(plat_asset_dir(), gfx_scale())) return 1;
+  text_set_rtl(i18n_rtl()); icon_init(plat_asset_dir());
+  /* who is watching: asked before any of a profile's data is opened (SB_PROFILE=adult|kids: development, no screen) */
+  { const char *dev = getenv("SB_PROFILE"); int who = dev ? !strcmp(dev, "kids") : gate_start(win);
+    if (who < 0) { fprintf(stderr, "[exit] closed at the profile screen\n"); SDL_GL_DeleteContext(ctx); SDL_DestroyWindow(win); SDL_Quit(); return 0; }
+    if (who == 1) { char lang[24]; snprintf(lang, sizeof lang, "%s", store_get("uiLang", "auto")); /* the Kids profile speaks the language the app started in */
+      profile_choose(1); store_switch(profile_dir()); store_set("uiLang", lang); } }
 #ifdef SB_WEBOS
   cache_prune_start(40); /* the app partition is small and shared with every app's install */
 #else
@@ -243,9 +254,7 @@ int main(int argc, char **argv) {
 #endif
   snprintf(p, sizeof p, "%s/cache", store_data_dir()); img_init(p); img_set_draw_scale(gfx_scale());
   if (memMb > 0) img_set_budget_mb(memMb < 1200 ? 40 : memMb < 3000 ? 128 : 192); /* pictures under the RAM the TV has (the shared atlas, backdrop and text add ~20 MB) */
-  i18n_init(plat_asset_dir(), getenv("SB_LANG") ? getenv("SB_LANG") : store_get("uiLang", "auto")); /* SB_LANG=ar: development */
-  if (!text_init(plat_asset_dir(), gfx_scale())) return 1;
-  text_set_rtl(i18n_rtl()); icon_init(plat_asset_dir()); sb_init();
+  sb_init();
   app_init(); player_init();
   app_register(SCR_LOGIN, &loginScreen); app_register(SCR_HOME, &homeScreen); app_register(SCR_DISC, &discScreen); app_register(SCR_LIB, &libScreen);
   app_register(SCR_DETAIL, &detailScreen); app_register(SCR_SIM, &simScreen); app_register(SCR_SEARCH, &searchScreen); app_register(SCR_SET, &setScreen); app_card_menu_hook = cwmenu_show;
@@ -275,6 +284,9 @@ int main(int argc, char **argv) {
       else if (e.type == SDL_MOUSEWHEEL) app_pointer_wheel((float)e.wheel.x, (float)e.wheel.y);
       else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) { SDL_GL_GetDrawableSize(win, &dw, &dh); gfx_resize(dw, dh); }
     }
+    /* the Adult profile, back after a while away: its PIN again; a PIN change asked in Settings */
+    if (profile_relock_due()) { if (gate_relock(win) < 0) { fprintf(stderr, "[exit] closed at the PIN\n"); app_quit(); } last = SDL_GetTicks(); }
+    { int ask = profile_asked(); if (ask == PROFILE_ASK_PIN) { gate_change_pin(win); last = SDL_GetTicks(); } }
     Uint32 now = SDL_GetTicks(); float dt = (now - last) / 1000.0f; last = now;
     { float pp = (float)pace_period() / 1000.0f; if (pp <= 0) pp = 1 / 60.0f; /* motion on the 60 Hz clock: an on-time frame is one period (no millisecond jitter); a slow one moves it 3 periods at most (no jump) */
       if (dt > pp * 0.5f && dt < pp * 1.5f) dt = pp; else if (dt > pp * 3) dt = pp * 3; }

@@ -1,5 +1,5 @@
-# Builds the installable package (.ipk) of the kids' edition and publishes it as the "kids-latest" release.
-name: Build Stremio Kids
+# Builds the installable package (.ipk) of the family edition (Adult and Kids profiles) and publishes it as the "family-latest" release.
+name: Build Stremio Family
 on:
   push:
     branches: [kids]
@@ -10,8 +10,8 @@ jobs:
   build:
     runs-on: ubuntu-22.04
     env:
-      APPID: tv.stremioorigin.kids
-      TITLE: Stremio Kids
+      APPID: tv.stremioorigin.family
+      TITLE: Stremio Family
       UPSTREAM_IPK: https://stremio-origin.github.io/webos/tv.stremioorigin.app_1.0.0_arm.ipk
       UPSTREAM_SHA: 949d4eabafb7290258eae8ad9e405e7f8f31f4c030071039258f382ca7769a42
       GH_TOKEN: ${{ github.token }}
@@ -42,10 +42,11 @@ jobs:
         run: ZIG="$(command -v zig)" tools/package.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: stremio-kids-ipk
+          name: stremio-family-ipk
           path: dist/*.ipk
-      - name: Publish as the kids-latest release
+      - name: Publish as the family-latest release
         run: |
           gh release delete kids-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create kids-latest dist/*.ipk --target "$GITHUB_SHA" --prerelease \
-            --title "Stremio Kids (latest build)" --notes "Built automatically from the kids branch at $GITHUB_SHA."
+          gh release delete family-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release create family-latest dist/*.ipk --target "$GITHUB_SHA" --prerelease \
+            --title "Stremio Family (latest build)" --notes "Built automatically from the kids branch at $GITHUB_SHA."

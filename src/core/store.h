@@ -5,6 +5,7 @@
 #include "cJSON.h"
 
 void store_init(const char *dataDir);
+void store_switch(const char *dataDir);  /* the same again for another folder (a profile), at start only */
 /* string / number values under the top-level object (settings and the like) */
 const char *store_get(const char *key, const char *def);
 void        store_set(const char *key, const char *value);
