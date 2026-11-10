@@ -22,10 +22,13 @@ jobs:
           version: 0.17.0
       - name: LG webOS SDK (headers and libraries to link against)
         run: |
-          mkdir -p "$HOME/origin-build/sdk"
-          gh release download -R openlgtv/buildroot-nc4 -p 'arm-webos-linux-gnueabi_sdk-buildroot.tar.gz' -D /tmp
-          tar xzf /tmp/arm-webos-linux-gnueabi_sdk-buildroot.tar.gz -C "$HOME/origin-build/sdk"
-          ls "$HOME/origin-build/sdk/arm-webos-linux-gnueabi_sdk-buildroot/arm-webos-linux-gnueabi/sysroot/usr/lib/libSDL2.so"
+          mkdir -p /tmp/sdk-dl "$HOME/origin-build/sdk"
+          gh release view -R openlgtv/buildroot-nc4 --json tagName,assets --jq '.tagName, (.assets[].name)'
+          gh release download -R openlgtv/buildroot-nc4 -p 'arm-webos-linux-gnueabi_sdk-buildroot*' -D /tmp/sdk-dl
+          for f in /tmp/sdk-dl/*; do tar xf "$f" -C "$HOME/origin-build/sdk"; done
+          SYSROOT="$(dirname "$(dirname "$(dirname "$(find "$HOME/origin-build/sdk" -name libSDL2.so -path '*sysroot/usr/lib/*' | head -1)")")")"
+          test -f "$SYSROOT/usr/lib/libSDL2.so"
+          echo "SDK=$SYSROOT" >> "$GITHUB_ENV"
       - name: Torrent and sound libraries, unchanged from the original 1.0.0 release
         run: |
           mkdir -p /tmp/up build/webos && cd /tmp/up
