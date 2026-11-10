@@ -18,7 +18,7 @@ const char *profile_dir(void);             /* the chosen profile's data folder (
 void profile_life(int l);
 int  profile_relock_due(void);             /* 1 once, on the frame loop's side */
 /* asked from Settings, done by the frame loop between two frames */
-enum { PROFILE_ASK_NONE = 0, PROFILE_ASK_PIN };
+enum { PROFILE_ASK_NONE = 0, PROFILE_ASK_PIN, PROFILE_ASK_SWITCH };
 void profile_ask(int what);
 int  profile_asked(void);                  /* what was asked, once */
 #endif

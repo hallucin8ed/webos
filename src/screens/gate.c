@@ -1,5 +1,6 @@
 #include "screens/gate.h"
 #include "core/profile.h"
+#include "core/kidctl.h"
 #include "core/app.h"
 #include "core/i18n.h"
 #include "core/keys.h"
@@ -10,7 +11,7 @@
 #include <string.h>
 
 enum { M_PICK, M_UNLOCK, M_CREATE, M_CONFIRM, M_OLD };
-static struct { int mode, pick, pad, n, wrong, fresh; char pin[5], first[5]; const char *msg; Uint32 lockUntil, msgAt; } G;
+static struct { char bed[8]; Uint32 bedAt; int mode, pick, pad, n, wrong, fresh; char pin[5], first[5]; const char *msg; Uint32 lockUntil, msgAt; } G;
 
 /* the pad: 1 2 3 / 4 5 6 / 7 8 9 / delete 0 */
 #define PAD_N 11
@@ -53,6 +54,7 @@ static void draw(void) {
     float s = 330, gap = 110, x0 = cx - s - gap / 2, y = 360;
     draw_tile(x0, y, s, "A", T("Adult"), T("PIN needed"), G.pick == 0, RGB(74, 62, 140));
     draw_tile(x0 + s + gap, y, s, "K", T("Kids"), NULL, G.pick == 1, RGB(36, 122, 88));
+    if (G.bedAt && SDL_GetTicks() - G.bedAt < 6000) text_draw(T1("It\xe2\x80\x99s bedtime. Kids opens again at {t}", "t", G.bed), cx, 880, 30, 600, RGB(255, 200, 120), 0, 0, ALIGN_CENTER);
     text_draw(T("Left / Right to choose, OK to open. Back closes the app"), cx, 960, 24, 400, WHITE_A(120), 0, 0, ALIGN_CENTER);
     return;
   }
@@ -98,7 +100,7 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
       if (G.mode == M_PICK) {
         if (k == K_LEFT) G.pick = 0; else if (k == K_RIGHT) G.pick = 1;
         else if (k == K_BACK || k == K_EXIT) return -1;
-        else if (k == K_OK) { if (G.pick == 1) return 1; if (G.fresh) return 0; G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; }
+        else if (k == K_OK) { if (G.pick == 1) { if (kidctl_bedtime(G.bed, sizeof G.bed)) { G.bedAt = SDL_GetTicks() | 1; continue; } return 1; } if (G.fresh) return 0; G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; }
         continue;
       }
       int done = 0;

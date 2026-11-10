@@ -54,11 +54,14 @@ static const Opt COLORS[] = { { "#ffffff", "White" }, { "#ffe600", "Yellow" }, {
 static const Opt OUTL[] = { { "#000000", "Black" }, { "#ffffff", "White" } };
 static const Opt BGS[] = { { "0", "None" }, { "1", "Solid" }, { ".6", "Transparent" } };
 static const Opt ASSO[] = { { "styled", "Styled" }, { "plain", "Plain" } };
+static const Opt PC_AGE[] = { { "0", "Only titles I allow" }, { "4", "U" }, { "8", "PG" }, { "12", "12" }, { "15", "15" } };
+static const Opt PC_FROM[] = { { "18:00", "18:00" }, { "18:30", "18:30" }, { "19:00", "19:00" }, { "19:30", "19:30" }, { "20:00", "20:00" }, { "20:30", "20:30" }, { "21:00", "21:00" }, { "21:30", "21:30" }, { "22:00", "22:00" }, { "23:00", "23:00" } };
+static const Opt PC_TO[] = { { "05:00", "05:00" }, { "05:30", "05:30" }, { "06:00", "06:00" }, { "06:30", "06:30" }, { "07:00", "07:00" }, { "07:30", "07:30" }, { "08:00", "08:00" }, { "08:30", "08:30" }, { "09:00", "09:00" } };
 static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" }, { "5", "5 min" }, { "10", "10 min" } };
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
-#define NCAT 9
+#define NCAT 10
 #define MAXROWS 48
-static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8];
+static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[6];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -131,7 +134,7 @@ static int about_opts(void) {
   int n = 0; const char *av = update_avail(); int st = update_state(); aboutSeen = update_serial();
   if (av) { Setting *s = &supS[n++]; set_act(s, "__upd", st == UPD_INSTALLING ? T1("Installing version {v}…", "v", av) : T1("Install version {v}", "v", av), update_msg()[0] ? update_msg() : T("Downloads, checks and installs it; the app opens again by itself")); s->raw = 1; }
   { Setting *s = &supS[n++]; set_act(s, "__check", T("Check for updates"), st == UPD_CHECKING ? T("Checking for updates…") : st == UPD_ERROR ? T("Could not check for updates") : av ? T1("Version {v} is available", "v", av) : st == UPD_NONE ? T("You have the latest version") : ""); s->raw = 1; }
-  set_act(&supS[n++], "__profile", profile_is_kids() ? "Leave the Kids profile" : "Switch profile", "The app closes. Open it again to choose who is watching");
+  set_act(&supS[n++], "__profile", profile_is_kids() ? "Leave the Kids profile" : "Switch profile", "Back to the screen that asks who is watching");
   if (!profile_is_kids()) set_act(&supS[n++], "__pin", "Change the parental PIN", "The current PIN, then the new one twice");
   set_act(&supS[n++], "__logs", "Share logs", "Share the code and describe the issue");
   if (welcome_support_url()[0]) set_act(&supS[n++], "__support", "Support the project", "A coffee keeps it going. A star helps others find it"); /* its codes in view (sized as if last) */
@@ -189,6 +192,12 @@ static void build(void) {
     for (int j = 0; j < 10 && n < 40; j++) { int have = 0; for (int i = 0; i < i18n_lang_count(); i++) if (!strcmp(i18n_lang_code(i), ORDER[j])) have = 1; if (!have) continue;
       snprintf(s->dynS[n], 64, "%s", ORDER[j]); s->dyn[n].v = s->dynS[n]; s->dyn[n].lb = i18n_lang_name(ORDER[j]); n++; }
     s->opts = s->dyn; s->nopts = n; }
+  set_s(&pcS[0], "pcRating", "Kids: age rating limit", "Titles rated above it are hidden in Kids, and those with no rating. Allow or block one title from its menu (hold OK)", PC_AGE, 5, "8");
+  set_s(&pcS[1], "pcLists", "Kids: lists from addons", "Titles in the catalogues of list addons installed on the Kids account are allowed", OO, 2, "true");
+  set_s(&pcS[2], "pcTorrents", "Kids: torrents", "Off: the Kids profile never plays a torrent", OO, 2, "false");
+  set_s(&pcS[3], "pcBed", "Kids: bedtime lock", "The Kids profile closes and will not open between the two times", OO, 2, "false");
+  set_s(&pcS[4], "pcBedFrom", "Bedtime starts", "", PC_FROM, 10, "19:30");
+  set_s(&pcS[5], "pcBedTo", "Bedtime ends", "The rules are read when the profile screen is shown: switch profile to apply a change", PC_TO, 9, "07:00");
   int nl = lang_opts(), nk = keys_opts(), na = addon_opts();
   set_act(&acctS[0], "__logout", "Log out", S.acct); acctS[0].raw = 1;
   int nab = about_opts();
@@ -201,9 +210,10 @@ static void build(void) {
     { "Screens", "Language", "set_lang", "The language of the app", NULL, langS, nl, 0 },
     { "Account and system", "Addons", "set_addon", "", NULL, addonS, na, 0 },
     { "Account and system", "Keys", "set_keys", "Titles in your language, ratings and reviews", "keys", keyS, nk, 0 },
+    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 6, 0 },
     { "Account and system", "About", "info", "Version, updates, logs and support", "about", supS, nab, 0 },
     { "", "Log out", "set_out", "", NULL, acctS, 1, 1 } };
-  ncat = 0; for (int i = 0; i < NCAT; i++) if (c[i].opts != keyS || nk) cats[ncat++] = c[i];
+  ncat = 0; for (int i = 0; i < NCAT; i++) if ((c[i].opts != keyS || nk) && (c[i].opts != pcS || !profile_is_kids())) cats[ncat++] = c[i];
   play_layout(); S.dirty = 1;
   best_caps_probe(caps_known, NULL); /* (the Dolby Vision row, once the TV has said) */
 }
@@ -396,7 +406,7 @@ static int key(int k) {
       if (!strcmp(op->k, "__trakt")) { qrcard_show_trakt(on_trakt_card, NULL); return 1; }
       if (!strcmp(op->k, "__traktOff")) { trakt_key_clear(); relang(); toast(T("The Trakt id is gone"), 2000, NULL); return 1; }
       if (!strcmp(op->k, "__keys")) { settings_open_keys(); return 1; }
-      if (!strcmp(op->k, "__profile")) { store_flush(); app_quit(); return 1; }
+      if (!strcmp(op->k, "__profile")) { store_flush(); profile_ask(PROFILE_ASK_SWITCH); return 1; }
       if (!strcmp(op->k, "__pin")) { profile_ask(PROFILE_ASK_PIN); return 1; }
       if (!strcmp(op->k, "__sync")) sync_now(); else if (!strcmp(op->k, "__logs")) logcard_show(); else if (!strcmp(op->k, "__guide")) welcome_show_guide();
       else if (!strcmp(op->k, "__support")) { if (welcome_github_url()[0]) { supWant = !supWant; tween_to(&supK, (float)supWant, 0.5f, EASE_IN_OUT); orbs_pulse(supWant ? ORB_RIGHT : ORB_LEFT, 0.6f); } } /* the other code, turned over */ else if (!strcmp(op->k, "__upd")) update_install(); else if (!strcmp(op->k, "__check")) update_check(1); else if (!strcmp(op->k, "__logout")) logout(); return 1; } /* (only Log out signs out: a row with no action of its own does nothing) */

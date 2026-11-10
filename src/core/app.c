@@ -1,3 +1,5 @@
+#include "core/profile.h"
+#include "core/kidctl.h"
 #include "core/app.h"
 #include "core/bgtrailer.h"
 #include "core/best.h"
@@ -691,6 +693,7 @@ void app_touch(void) { idle_touch(); }
 static Scr colorFrom; static int colorFromSet;
 void app_go(Scr s, const void *params, int noStack) {
   idle_touch();
+  if (s == SCR_DETAIL && params && profile_is_kids() && !kidctl_ok(((const DetailParams *)params)->it.id)) { toast(T("Not available in the Kids profile"), 2600, NULL); return; }
   if (!noStack && SCR != s) { float ox, oy; int has = 1; if (navf.kind == NAV_ZOOM) { ox = navf.x; oy = navf.y; } else has = scr_origin(&ox, &oy); /* nothing focused: a plain fade in, Back toward the middle */
     if (nback == 8) { memmove(backStack, backStack + 1, 7 * sizeof *backStack); memmove(backX, backX + 1, 7 * sizeof *backX); memmove(backY, backY + 1, 7 * sizeof *backY); nback = 7; }
     backX[nback] = ox; backY[nback] = oy; backStack[nback++] = SCR;

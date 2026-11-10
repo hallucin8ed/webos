@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include "core/profile.h"
+#include "core/kidctl.h"
 #include <time.h>
 #include <zlib.h>
 #include <SDL2/SDL.h>
@@ -166,11 +168,22 @@ static ItemList *list_from_metas(const cJSON *metas, const char *type, int max) 
   const cJSON *m; cJSON_ArrayForEach(m, metas) { if (l->n >= n) break; sb_fill_item(&l->items[l->n], m, type); if (l->items[l->n].id[0]) l->n++; }
   return l;
 }
+/* the Kids profile: only the titles its rules let through (a list addon's own catalogue is a list of approved
+   titles; a search is never one); more of the answer is read so the rows still fill */
+#define KID_READ(n) (profile_is_kids() ? 100 : (n))
+static int kid_trusted(const char *url) { return url && strncmp(url, CINEMETA, strlen(CINEMETA)) && !strstr(url, "search="); }
+static void kid_filter(ItemList *l, int trusted, int max) {
+  if (!l) return;
+  if (profile_is_kids()) { int k = 0;
+    for (int i = 0; i < l->n; i++) { if (trusted) kidctl_listed(l->items[i].id); if (kidctl_ok(l->items[i].id)) { if (k != i) l->items[k] = l->items[i]; k++; } }
+    l->n = k; }
+  if (l->n > max) l->n = max;
+}
 typedef struct { char url[512], type[16], key[600]; int n; /* key: "cat:" + the whole address (cut short, every catalog of one addon shared one file) */ void (*cb)(ItemList *, int, void *); void *ud; char *cachedJson; } CatReq;
 static void on_catalog(int st, const unsigned char *b, size_t len, void *ud) {
   CatReq *r = ud; Uint32 tq0 = SDL_GetTicks(); cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *metas = js_arr(j, "metas");
   if (metas && cJSON_GetArraySize(metas)) {
-    ItemList *l = list_from_metas(metas, r->type, r->n); Uint32 tq1 = SDL_GetTicks();
+    ItemList *l = list_from_metas(metas, r->type, KID_READ(r->n)); Uint32 tq1 = SDL_GetTicks();
     /* the slim list is what is cached; a copy under 12 h old stays on screen (the fresh order shows next launch) */
     cJSON *slim = cJSON_CreateArray(); for (int i = 0; i < l->n; i++) { Item *it = &l->items[i]; cJSON *o = cJSON_CreateObject();
       cJSON_AddStringToObject(o, "id", it->id); cJSON_AddStringToObject(o, "type", it->type); cJSON_AddStringToObject(o, "name", it->name); cJSON_AddStringToObject(o, "poster", it->poster);
@@ -180,7 +193,7 @@ static void on_catalog(int st, const unsigned char *b, size_t len, void *ud) {
     char cp[1200]; int fresh = r->cachedJson && cache_file(r->key, 43200, cp, sizeof cp);
     if (!fresh) cache_write(r->key, (unsigned char *)txt, strlen(txt));
     { AddonCache h; addon_cache_hints(j, &h); char hk[620], v[24]; snprintf(hk, sizeof hk, "cah:%s", r->url); int k = snprintf(v, sizeof v, "%ld", h.maxAge > 0 ? h.maxAge : 0); cache_write(hk, (unsigned char *)v, (size_t)k); } /* how long the addon says it holds */
-    Uint32 tq2 = SDL_GetTicks(); if (!same && !fresh) r->cb(l, 0, r->ud); else itemlist_free(l);
+    Uint32 tq2 = SDL_GetTicks(); if (!same && !fresh) { kid_filter(l, kid_trusted(r->url), r->n); r->cb(l, 0, r->ud); } else itemlist_free(l);
     if (getenv("SB_SLOWLOG")) fprintf(stderr, "[cat] %d metas, %d kept: list %u ms, slim %u ms, page %u ms (%s)\n", cJSON_GetArraySize(metas), r->n, tq1 - tq0, tq2 - tq1, SDL_GetTicks() - tq2, same ? "same" : fresh ? "fresh copy shown" : "new");
     free(txt);
   } else if (!r->cachedJson) { ItemList *l = calloc(1, sizeof *l); l->items = calloc(1, sizeof(Item)); l->total = metas ? 0 : -1; r->cb(l, 0, r->ud); } /* no answer at all: -1 */
@@ -189,7 +202,7 @@ static void on_catalog(int st, const unsigned char *b, size_t len, void *ud) {
 void sb_catalog_url(const char *url, const char *type, int n, void (*cb)(ItemList *, int, void *), void *ud) {
   CatReq *r = calloc(1, sizeof *r); copy_str(r->url, sizeof r->url, url); copy_str(r->type, sizeof r->type, type); snprintf(r->key, sizeof r->key, "cat:%s", url); r->n = n; r->cb = cb; r->ud = ud;
   size_t cl; unsigned char *t = cache_read(r->key, 0, &cl);
-  if (t) { cJSON *c = cJSON_Parse((const char *)t); if (cJSON_IsArray(c) && cJSON_GetArraySize(c)) { r->cachedJson = (char *)t; cb(list_from_metas(c, type, n), 1, ud); } else free(t); cJSON_Delete(c); }
+  if (t) { cJSON *c = cJSON_Parse((const char *)t); if (cJSON_IsArray(c) && cJSON_GetArraySize(c)) { r->cachedJson = (char *)t; ItemList *cl = list_from_metas(c, type, KID_READ(n)); kid_filter(cl, kid_trusted(url), n); cb(cl, 1, ud); } else free(t); cJSON_Delete(c); }
   /* the addon's own cacheMaxAge: a copy younger than that is the answer (no request) */
   if (r->cachedJson) { char hk[620], cp[1200]; snprintf(hk, sizeof hk, "cah:%s", url); size_t hl; unsigned char *h = cache_read(hk, 0, &hl); long age = h ? atol((const char *)h) : 0; free(h);
     if (age > 0 && cache_file(r->key, age, cp, sizeof cp)) { free(r->cachedJson); free(r); return; } }
@@ -197,18 +210,18 @@ void sb_catalog_url(const char *url, const char *type, int n, void (*cb)(ItemLis
 }
 void sb_catalog(const CatalogDef *d, void (*cb)(ItemList *, int, void *), void *ud) { sb_catalog_url(d->url, d->type, 16, cb, ud); }
 /* a further page: the extra the catalog is shown with, and skip */
-typedef struct { char type[16]; void (*cb)(ItemList *, int, void *); void *ud; } PageReq;
+typedef struct { char type[16]; void (*cb)(ItemList *, int, void *); void *ud; int trusted; } PageReq;
 static void on_page(int st, const unsigned char *b, size_t len, void *ud) {
   (void)len; PageReq *r = ud; cJSON *j = st == 200 ? net_json(b) : NULL; const cJSON *metas = js_arr(j, "metas");
   const cJSON *hm = cJSON_GetObjectItemCaseSensitive(j, "hasMore"); int more = cJSON_IsBool(hm) ? cJSON_IsTrue(hm) : -1;
   if (st == 200 && !j) fprintf(stderr, "[addon] a catalog page that is not JSON\n");
-  r->cb(st == 200 || st == 404 ? list_from_metas(metas, r->type, 200) : NULL, more, r->ud); /* (a 404 or no metas: the end) */
+  { ItemList *pl = st == 200 || st == 404 ? list_from_metas(metas, r->type, 200) : NULL; kid_filter(pl, r->trusted, 200); r->cb(pl, more, r->ud); } /* (a 404 or no metas: the end) */
   net_json_free(j); free(r);
 }
 void sb_catalog_page(const CatalogDef *d, int skip, void (*cb)(ItemList *, int, void *), void *ud) {
   char ex[260], sk[16], url[800]; copy_str(ex, sizeof ex, d->extra); snprintf(sk, sizeof sk, "%d", skip); addon_extra_add(ex, sizeof ex, "skip", sk);
   snprintf(url, sizeof url, "%s/%s.json", d->path, ex);
-  PageReq *r = calloc(1, sizeof *r); copy_str(r->type, sizeof r->type, d->type); r->cb = cb; r->ud = ud; net_get(url, on_page, r);
+  PageReq *r = calloc(1, sizeof *r); copy_str(r->type, sizeof r->type, d->type); r->cb = cb; r->ud = ud; r->trusted = kid_trusted(url); net_get(url, on_page, r);
 }
 /* every catalog that takes a search (and needs nothing else), in addon order */
 int sb_search_defs(const char *q, CatalogDef *out, int max) {
@@ -374,7 +387,7 @@ int lib_cw_items(ItemList *out) {
   cJSON_ArrayForEach(it, lib) { const cJSON *s = js_obj(it, "state"); const char *ty = js_str(it, "type", "");
     if (!strcmp(ty, "other") || (js_bool(it, "removed", 0) && !js_bool(it, "temp", 0))) continue;
     double to = js_num(s, "timeOffset", 0), d = js_num(s, "duration", 0); if (to <= 0) continue; if (d > 0 && to > d * 0.96) continue;
-    if (!js_str(it, "name", "")[0]) continue; if (n < 256) picks[n++] = (cJSON *)it; }
+    if (!js_str(it, "name", "")[0]) continue; if (!kidctl_ok(js_str(it, "_id", ""))) continue; if (n < 256) picks[n++] = (cJSON *)it; }
   qsort(picks, n, sizeof picks[0], cmp_mtime); if (n > 12) n = 12;
   out->items = calloc(n ? n : 1, sizeof(Item)); out->n = n; for (int i = 0; i < n; i++) { item_from_lib(&out->items[i], picks[i]); out->items[i].cw = 1; }
   return n;
@@ -623,7 +636,8 @@ static void streams_answer(StreamPart *p, const cJSON *arr) {
   StreamReq *r = p->req; const cJSON *s;
   StreamGroup g; copy_str(g.name, sizeof g.name, p->name); int na = arr ? cJSON_GetArraySize(arr) : 0; if (!r->ans && na > 40) na = 40; /* the best-stream pick reads all of them, as the web does: a 4K-first addon lists its 1080p files late */
   g.items = calloc(na ? na : 1, sizeof(Stream)); g.n = 0;
-  if (arr) cJSON_ArrayForEach(s, arr) { if (g.n >= na) break; if (stream_parse(&g.items[g.n], s, p->name)) g.n++; }
+  int noP2p = kidctl_no_torrents();
+  if (arr) cJSON_ArrayForEach(s, arr) { if (g.n >= na) break; if (stream_parse(&g.items[g.n], s, p->name) && !(noP2p && g.items[g.n].p2p)) g.n++; }
   r->total += g.n; if (g.n) r->part(&g, p->idx, r->ud); else free(g.items);
 }
 static void stream_part_done(StreamPart *p) {
@@ -658,6 +672,7 @@ int sb_stream_addons(const char *type, const char *vid, char (*names)[96], int m
 }
 /* only >= 0: that one of the addons serving the video (in the user's order), alone */
 static unsigned streams_req(const char *type, const char *vid, int only, StreamPartCb part, StreamDoneCb done, StreamAnsCb ans, void *ud) {
+  if (!kidctl_ok(vid)) { fprintf(stderr, "[kids] no streams: this title is not allowed\n"); done(0, ud); return 0; }
   cJSON *a = sb_addons(); StreamReq *r = calloc(1, sizeof *r); r->tok = ++streamTok; r->part = part; r->done = done; r->ans = ans; r->ud = ud;
   const cJSON *own = video_streams(type, vid);
   if (own && only > 0) own = NULL, a = NULL; /* (its own list is the one group) */
@@ -716,6 +731,7 @@ static void on_sug(int st, const unsigned char *b, size_t n, void *ud) {
     double y = js_num(x, "y", 0); if (y) snprintf(it->metaLine, sizeof it->metaLine, "%d", (int)y);
     if (nn < 6) { int dup = 0; for (int i = 0; i < nn; i++) if (!strcasecmp(names[i], it->name)) dup = 1; if (!dup) copy_str(names[nn++], 128, it->name); } }
   if (!d) l->total = -1; /* no answer */
+  if (profile_is_kids()) { kid_filter(l, 0, 12); nn = 0; for (int i = 0; i < l->n && nn < 6; i++) copy_str(names[nn++], 128, l->items[i].name); } /* (only what may be shown is suggested) */
   net_json_free(j); r->cb(l, names, nn, r->ud); free(r);
 }
 void sb_suggest(const char *q, void (*cb)(ItemList *, char[6][128], int, void *), void *ud) {

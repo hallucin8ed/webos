@@ -1,5 +1,7 @@
 /* The card menu (hold OK on any card or episode): a glass card as tall as its options, centred on its side, the
    accent highlight gliding under the focus. */
+#include "core/profile.h"
+#include "core/kidctl.h"
 #include "ui/sound.h"
 #include "ui/orbs.h"
 #include "screens/cwmenu.h"
@@ -28,7 +30,7 @@
 #define CW 640.0f
 #define PX 36.0f
 #define IH 64.0f    /* an option, and 4 between them */
-enum { A_STREAMS, A_PLAY, A_RESTART, A_DETAILS, A_WATCHED, A_TRAILER, A_SIMILAR, A_REVIEWS, A_LIB };
+enum { A_STREAMS, A_PLAY, A_RESTART, A_DETAILS, A_WATCHED, A_TRAILER, A_SIMILAR, A_REVIEWS, A_LIB, A_KIDS };
 static struct {
   int open, closing, idx, n; int acts[9]; char labels[9][96]; const char *icons[9]; Item it; char kind[32], sub[400];
   Tween x, op; /* the panel's slide and fade: an even ease-out (the quick-tween curve put it all in the first two frames) */ Tween out, grow; double openAt; SGlass glass; FPill pill; Nudge nudge; float h, titleLines;
@@ -132,6 +134,8 @@ static void fx_draw(void) {
 static void act(int a) {
   Item it = M.it; fpill_press(&M.pill);
   switch (a) {
+    case A_KIDS: { int mk = (kidctl_mark(it.id) + 1) % 3; kidctl_set_mark(it.id, mk); sound_play(SND_TOGGLE); close();
+      toast(T(mk == KID_ALLOWED ? "Allowed in Kids" : mk == KID_BLOCKED ? "Blocked in Kids" : "Kids: by its age rating"), 2400, NULL); } break;
     case A_STREAMS: close(); detail_open_streams(it.videoId); break;
     case A_PLAY: close(); app_open_item(&it); break;
     case A_RESTART: close(); app_play_from_start(&it); break;
@@ -216,6 +220,7 @@ void cwmenu_show(const Item *it) {
   if (!it->ep) add(A_SIMILAR, "similar", T("Watch something similar"));
   if (!it->ep && sb_is_imdb(it->id)) add(A_REVIEWS, "reviews", T("Reviews"));
   int inL = lib_has(it->id); add(A_LIB, inL ? "minus" : "plus", T(inL ? "Remove from Library" : "Add to Library"));
+  if (!profile_is_kids() && !it->ep) { int mk = kidctl_mark(it->id); add(A_KIDS, mk == KID_ALLOWED ? "minus" : "plus", T(mk == KID_RULE ? "Kids: allow this title" : mk == KID_ALLOWED ? "Kids: block this title" : "Kids: back to the age rating")); }
   if (getenv("SB_SLOWLOG")) fprintf(stderr, "[menu] options in %u ms\n", SDL_GetTicks() - tm0);
   M.titleLines = (float)text_wrap_count(it->name, CW - 2 * PX, 2, 38, 700, -0.5f); if (M.titleLines < 1) M.titleLines = 1;
   M.h = items_y() + M.n * (IH + 4) + 30; /* as tall as its options */

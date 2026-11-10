@@ -96,6 +96,8 @@ static int vsyncOn __attribute__((unused));   /* SB_VSYNC=1: let the driver wait
 #include "screens/settings.h"
 #include "screens/splash.h"
 #include "core/profile.h"
+#include "core/kidctl.h"
+#include <unistd.h>
 #include "screens/gate.h"
 #include "screens/player.h"
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -173,7 +175,7 @@ static void p2p_test_tick(int frame) {
     else { fprintf(stderr, "[p2ptest] %d cycles done, quitting\n", PT.cycles); app_quit(); } }
 }
 int main(int argc, char **argv) {
-  (void)argc; (void)argv;
+  (void)argc; int again = 0;
   setlocale(LC_NUMERIC, "C");
 #ifdef SB_MAC
   signal(SIGABRT, on_alarm); signal(SIGSEGV, on_alarm); signal(SIGBUS, on_alarm); /* a crash leaves a backtrace in the log */
@@ -199,7 +201,7 @@ int main(int argc, char **argv) {
     else { SDL_GL_SetAttribute(SDL_GL_RED_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_GREEN_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_BLUE_SIZE, 8); SDL_GL_SetAttribute(SDL_GL_ALPHA_SIZE, cfg == 1 ? 0 : 8); } }
   SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 0); SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 0);
   store_init(plat_data_dir()); /* before the window: the drawing size is a setting */
-  profile_init(plat_data_dir());
+  profile_init(plat_data_dir()); kidctl_capture(plat_data_dir());
   int memMb = plat_mem_total_mb();
   int w, h; Uint32 flags; plat_window_size(&w, &h, &flags);
   { /* always the TV's own resolution (a saved "uiRes" from older versions is ignored); SB_RES=720 draws at 1280x720
@@ -286,7 +288,10 @@ int main(int argc, char **argv) {
     }
     /* the Adult profile, back after a while away: its PIN again; a PIN change asked in Settings */
     if (profile_relock_due()) { if (gate_relock(win) < 0) { fprintf(stderr, "[exit] closed at the PIN\n"); app_quit(); } last = SDL_GetTicks(); }
-    { int ask = profile_asked(); if (ask == PROFILE_ASK_PIN) { gate_change_pin(win); last = SDL_GetTicks(); } }
+    { int ask = profile_asked(); if (ask == PROFILE_ASK_PIN) { gate_change_pin(win); last = SDL_GetTicks(); }
+      else if (ask == PROFILE_ASK_SWITCH) { fprintf(stderr, "[profile] back to the profile screen\n"); again = 1; app_quit(); } }
+    { static Uint32 bedAt; if (profile_is_kids() && SDL_GetTicks() - bedAt > 20000) { bedAt = SDL_GetTicks(); if (kidctl_bedtime(NULL, 0)) { fprintf(stderr, "[kids] bedtime\n"); again = 1; app_quit(); } } }
+    kidctl_tick();
     Uint32 now = SDL_GetTicks(); float dt = (now - last) / 1000.0f; last = now;
     { float pp = (float)pace_period() / 1000.0f; if (pp <= 0) pp = 1 / 60.0f; /* motion on the 60 Hz clock: an on-time frame is one period (no millisecond jitter); a slow one moves it 3 periods at most (no jump) */
       if (dt > pp * 0.5f && dt < pp * 1.5f) dt = pp; else if (dt > pp * 3) dt = pp * 3; }
@@ -386,5 +391,8 @@ int main(int argc, char **argv) {
   p2p_shutdown(); /* the engine's threads end and its buffer files go */
   store_flush();
   SDL_GL_DeleteContext(ctx); SDL_DestroyWindow(win); SDL_Quit();
+  if (again) { /* the profile screen again: the app starts over in place (everything it held is let go first) */
+    fflush(stderr); for (int fd = 3; fd < 1024; fd++) close(fd);
+    execv("/proc/self/exe", argv); execv(argv[0], argv); }
   return 0;
 }
