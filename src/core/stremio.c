@@ -142,6 +142,12 @@ int sb_home_defs(CatalogDef *out, int max) {
 /* Discover: Cinemeta's trending and top rated, its genres (the ones its manifest offers), then the installed catalogs
    Home has no room for */
 int sb_disc_defs(CatalogDef *out, int max) {
+  if (profile_is_kids()) { /* Kids: the lists Home had no room for, then family genres from Cinemeta (no Trending, no Horror) */
+    int n = board_defs(out, max > 5 ? max - 5 : 0, HOME_ROWS);
+    static const char *const G[5][3] = { { "Animation", "movie", "Animation \xc2\xb7 Movies" }, { "Animation", "series", "Animation \xc2\xb7 Series" }, { "Family", "movie", "Family \xc2\xb7 Movies" }, { "Adventure", "movie", "Adventure \xc2\xb7 Movies" }, { "Comedy", "movie", "Comedy \xc2\xb7 Movies" } };
+    for (int i = 0; i < 5 && n < max; i++) { char ex[64] = "", key[16], path[200]; addon_extra_add(ex, sizeof ex, "genre", G[i][0]); snprintf(key, sizeof key, "k_g_%d", i); snprintf(path, sizeof path, CINEMETA "/catalog/%s/top", G[i][1]); def_set(&out[n++], G[i][2], G[i][1], path, ex, 1, key); }
+    return n;
+  }
   const char *defs[3][4] = { { "Trending · Movies", "movie", CINEMETA "/catalog/movie/top", "d_m_top" }, { "Trending · Series", "series", CINEMETA "/catalog/series/top", "d_s_top" }, { "Top Rated · Movies", "movie", CINEMETA "/catalog/movie/imdbRating", "d_m_ir" } };
   const char *genres[5] = { "Action", "Comedy", "Sci-Fi", "Drama", "Horror" };
   int n = 0;
