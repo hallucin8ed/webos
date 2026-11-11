@@ -862,6 +862,7 @@ static void key_dispatch(int k, int repeat) {
   if (app_overlay) { if (k == K_OK && menuGuard) return; app_overlay->key(k); return; }
   if (k == K_BACK) { app_back(); return; }
   if (k == K_EXIT) { app_quit(); return; }
+  if (k == K_BLUE && SCR != SCR_LOGIN) { sound_play(SND_TAB); store_flush(); profile_ask(PROFILE_ASK_SWITCH); return; } /* blue: back to "Who's watching?" */
   if ((k == K_RED || k == K_GREEN) && SCR != SCR_LOGIN) { if (k == K_RED && update_notice_key()) { sound_play(SND_TAB); return; } /* a notice out: red takes you to what it is about */
     int t = k == K_RED ? NAV_SET : NAV_SEARCH; sound_play(SND_TAB);
     if (SCR == chipScr(t) && colorFromSet) { Scr p = colorFrom; colorFromSet = 0; int ci = -1; for (int j = 0; j < 5; j++) if (chipScr(j) == p) ci = j; /* pressed on its own page: back where it was opened from */

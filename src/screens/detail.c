@@ -475,7 +475,7 @@ static int key_in(int k) {
   else if (k == K_LEFT) D.epIdx = D.epIdx > 0 ? D.epIdx - 1 : 0;
   else if (k == K_UP) D.zone = 1;
   else if (k == K_OK) { if (D.epIdx < D.neps) { const char *v = js_str(D.eps[D.epIdx], "id", ""); if (unreleased(D.eps[D.epIdx])) { not_aired(v); return 1; } if (best_on()) { if (!D.epHold) { D.epHold = 1; D.epSwell = 0; D.epHoldAt = app_now(); snprintf(D.epVid, sizeof D.epVid, "%s", v); } } else detail_open_streams(v); return 1; } } /* best stream on: a tap plays it, a hold opens its streams */
-  else if ((k == K_YELLOW || k == K_BLUE) && D.epIdx < D.neps) { const Item *fi = focused(); if (fi) { Item it = *fi; sound_play(SND_TOGGLE); lib_toggle_watched(&it, js_arr(D.meta, "videos")); app_refresh_boards(); detail_refresh_watched();
+  else if (k == K_YELLOW && D.epIdx < D.neps) { const Item *fi = focused(); if (fi) { Item it = *fi; sound_play(SND_TOGGLE); lib_toggle_watched(&it, js_arr(D.meta, "videos")); app_refresh_boards(); detail_refresh_watched();
       toast(T(lib_is_marked_watched(&it) ? "Marked as watched" : "Marked as unwatched"), 1800, NULL); } return 1; } /* the yellow or blue key: this episode watched, or not */
   else if (k == K_DOWN && D.epIdx < D.neps) { char im[32]; if (imdb_of(im, sizeof im)[0]) { const Item *fi = focused(); if (fi) { Item it = *fi; sound_focus(); D.pageZone = 2; revpanel_show_page(&it); return 1; } } } /* Down: this episode's reviews, risen into the page as a film's */
   else if (k == K_BACK) { D.zone = 1; paint(); return 1; }

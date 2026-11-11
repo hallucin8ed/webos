@@ -39,8 +39,8 @@ void sync_tick(void) {
   double now = app_now();
   if (!libBoot && now - bootAt >= 0.7) { libBoot = 1; sb_pull_library(on_lib, NULL); }
   if (!addonBoot && now - bootAt >= 0.9) { addonBoot = 1; sb_sync_addons(on_addons, NULL); }
-  if (resumed) { resumed = 0; if (sb_signed_in()) sb_sync_soon(1); } /* back from another app, or relaunched */
-  if (now - idleAt >= 240) { idleAt = now; if (!away && app_idle() > 20 && sb_signed_in()) sb_sync_soon(0); }
+  if (resumed) { resumed = 0; if (sb_signed_in()) { sb_sync_soon(1); sb_sync_addons(on_addons, NULL); } } /* back from another app, or relaunched */
+  if (now - idleAt >= 240) { idleAt = now; if (!away && app_idle() > 20 && sb_signed_in()) { sb_sync_soon(0); sb_sync_addons(on_addons, NULL); } }
   if (rebuildWanted && (app_idle() >= 0.7 || now - rebuildSince >= 5)) {
     rebuildWanted = 0;
     if ((SCR == SCR_HOME || SCR == SCR_LIB) && !player_open()) board_rebuild(); /* elsewhere: rebuilt when shown */
