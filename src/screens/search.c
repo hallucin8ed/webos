@@ -46,6 +46,7 @@ static int key_at(int r, int c) { if (r < rows_of()) return r * SCOLS + c; retur
 static void live(void);
 /* the searches before: the six latest that led to a title being opened, newest first, kept in this profile's own data */
 #define RECENT_MAX 6
+#define QRS 250.0f   /* the phone-typing code: big enough to scan from the sofa */
 static void recent_show(void) {
   char buf[900]; snprintf(buf, sizeof buf, "%s", store_get("recentSearch", "")); S.nsug = 0;
   for (char *sv = NULL, *t = strtok_r(buf, "\n", &sv); t && S.nsug < RECENT_MAX; t = strtok_r(NULL, "\n", &sv)) if (*t) snprintf(S.sug[S.nsug++], 128, "%s", t);
@@ -101,6 +102,9 @@ static void on_sug(ItemList *l, char names[6][128], int nn, void *ud) {
   if ((unsigned)(uintptr_t)ud != S.tok) { if (l) itemlist_free(l); return; }
   itemlist_clear(&S.top); S.topFail = !l || l->total < 0; if (l) { S.top = *l; free(l); }
   S.nsug = 0; for (int i = 0; i < nn && S.nsug < 6; i++) { int dup = 0; for (int k = 0; k < S.nsug; k++) if (!strcasecmp(S.sug[k], names[i])) dup = 1; if (!dup && names[i][0]) snprintf(S.sug[S.nsug++], 128, "%s", names[i]); }
+  { char rb[900]; snprintf(rb, sizeof rb, "%s", store_get("recentSearch", "")); size_t ql = strlen(S.q); int add = 0; /* earlier searches that start with what is typed come first */
+    for (char *sv = NULL, *t = strtok_r(rb, "\n", &sv); t && add < 2 && ql; t = strtok_r(NULL, "\n", &sv)) if (!strncasecmp(t, S.q, ql) && strcasecmp(t, S.q)) { int dup = 0; for (int k = 0; k < S.nsug; k++) if (!strcasecmp(S.sug[k], t)) dup = 1; if (dup) continue;
+      int m = S.nsug < 6 ? S.nsug : 5; memmove(S.sug[add + 1], S.sug[add], (size_t)(m - add) * 128); snprintf(S.sug[add], 128, "%s", t); S.nsug = m + 1; add++; } }
   S.topDone = 1; merge();
 }
 /* a catalog's answer: the query's token above, the catalog's place in the low 5 bits */
@@ -221,13 +225,13 @@ static void draw(void) {
     else if (i == NK) text_draw(T("Space"), x + w / 2 + nx, y + (66 - text_line_height(24)) / 2 + ny, 24, 700, fg, 0.4f, w - 16, ALIGN_CENTER);
     else icon_draw("backspace", x + w / 2 - 15 + nx, y + 18 + ny, 30, fg); }
   /* the QR for typing on the phone, under the keyboard (the code only where the TV has a network address) */
-  if (S.qrOk) { float qy = TOP_Y + 76 + 18 + (rows_of() + 1) * 74 + 30, qx = rtl ? SB_W - LEFT_X - 150 : LEFT_X;
-    if (!qr_draw(S.qrUrl, qx, qy, 150, 14, 8)) gfx_rrect(qx, qy, 150, 150, 14, WHITE_A(20));
-    const char *t1 = T("Type on your phone"), *t2 = T("Scan with your phone's camera, then type there"); float tw = 552 - 150 - 22, lh2 = 31;
-    static int n2; static unsigned n2Lg; if (n2Lg != i18n_gen()) { n2Lg = i18n_gen(); n2 = text_wrap_count(t2, tw, 3, 23, 400, 0); } /* once per language */
-    float th = text_line_height(24) + 6 + n2 * lh2, ty = qy + 75 - th / 2, tx = rtl ? qx - 22 : qx + 150 + 22;
+  if (S.qrOk) { float qy = TOP_Y + 76 + 18 + (rows_of() + 1) * 74 + 22, qx = rtl ? SB_W - LEFT_X - QRS : LEFT_X;
+    if (!qr_draw(S.qrUrl, qx, qy, QRS, 18, 8)) gfx_rrect(qx, qy, QRS, QRS, 18, WHITE_A(20));
+    const char *t1 = T("Type on your phone"), *t2 = T("Scan with your phone's camera, then type there"); float tw = 552 - QRS - 24, lh2 = 31;
+    static int n2; static unsigned n2Lg; if (n2Lg != i18n_gen()) { n2Lg = i18n_gen(); n2 = text_wrap_count(t2, tw, 4, 23, 400, 0); } /* once per language */
+    float th = text_line_height(24) + 6 + n2 * lh2, ty = qy + QRS / 2 - th / 2, tx = rtl ? qx - 24 : qx + QRS + 24;
     text_draw(t1, tx, ty, 24, 700, WHITE_A(255), 0, tw, rtl ? ALIGN_RIGHT : ALIGN_LEFT);
-    text_draw_wrapped(t2, tx, ty + text_line_height(24) + 6 + (lh2 - text_line_height(23)) / 2, tw, 3, 23, 400, WHITE_A(191), 0, rtl ? ALIGN_RIGHT : ALIGN_LEFT, lh2); }
+    text_draw_wrapped(t2, tx, ty + text_line_height(24) + 6 + (lh2 - text_line_height(23)) / 2, tw, 4, 23, 400, WHITE_A(191), 0, rtl ? ALIGN_RIGHT : ALIGN_LEFT, lh2); }
   /* the right side: hint, suggestions, the grid */
   float rx = rtl ? SB_W - RIGHT_X : RIGHT_X, ry = TOP_Y; int al = rtl ? ALIGN_RIGHT : ALIGN_LEFT;
   if (S.q[0] && !S.items.n && !S.final) { /* the loading line */
