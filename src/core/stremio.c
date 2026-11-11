@@ -115,7 +115,9 @@ static void def_set(CatalogDef *d, const char *title, const char *type, const ch
    search or a list of ids. from: how many to pass over first */
 static int board_defs(CatalogDef *out, int max, int from) {
   int n = 0, seen = 0; cJSON *a = sb_addons(); const cJSON *ad; if (!a) return 0; int ai = 0;
+  for (int pass = 0; pass < (profile_is_kids() ? 2 : 1); pass++) { ai = 0; /* Kids: the list addons first, Cinemeta's own rows after (Home has only a few places) */
   cJSON_ArrayForEach(ad, a) { if (!sb_addon_on(ad)) { ai++; continue; } const cJSON *cats = js_arr(js_obj(ad, "manifest"), "catalogs"), *cat; char base[512]; addon_base(ad, base, sizeof base); int ci = 0;
+    if (profile_is_kids() && (strncmp(base, CINEMETA, strlen(CINEMETA)) != 0) != (pass == 0)) { ai++; continue; }
     if (cats) cJSON_ArrayForEach(cat, cats) {
       const char *ctype = js_str(cat, "type", NULL), *cid = js_str(cat, "id", NULL); char ex[200];
       if (ctype && cid && *ctype && *cid && addon_cat_default_extra(cat, ex, sizeof ex) == 0 && seen++ >= from && n < max) {
@@ -124,7 +126,7 @@ static int board_defs(CatalogDef *out, int max, int from) {
         addon_urlenc(ctype, te, sizeof te); addon_urlenc(cid, ie, sizeof ie); snprintf(path, sizeof path, "%s/catalog/%s/%s", base, te, ie);
         def_set(d, title, ctype, path, ex, addon_cat_extra(cat, "skip", NULL, NULL, NULL), key); }
       ci++; }
-    ai++; }
+    ai++; } }
   return n;
 }
 #define HOME_ROWS 8
