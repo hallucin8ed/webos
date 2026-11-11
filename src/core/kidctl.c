@@ -86,7 +86,7 @@ static int age_of(const char *r) {
 #define BATCH 40
 static char queue[QMAX][28]; static int nq;
 typedef struct { char ids[BATCH][28]; int n, phase; } Job;
-static int flying, changed; static double holdUntil, refreshAt;
+static unsigned gen_; static int flying, changed; static double holdUntil, refreshAt;
 static void send(Job *j);
 static void learnt(const char *id, int age) { Ent *e = tab_at(&ages, id, 1); if (!e) return; e->v = (signed char)age; char p[1100]; ages_path(p, sizeof p); append(p, id, age, 1); if (age >= 0 && age <= maxAge) changed = 1; }
 static void on_ages(int st, const unsigned char *body, size_t len, void *ud) {
@@ -105,7 +105,7 @@ static void on_ages(int st, const unsigned char *body, size_t len, void *ud) {
     else learnt(j->ids[i], -1); }
   fprintf(stderr, "[kids] ratings (%s): %d of %d\n", j->phase ? "US" : "UK", got, j->n);
   net_json_free(r); free(j);
-  if (again && again->n) send(again); else { free(again); flying = 0; if (changed) { changed = 0; refreshAt = app_now() + 1.0; } }
+  if (again && again->n) send(again); else { free(again); flying = 0; if (changed) { changed = 0; gen_++; refreshAt = app_now() + 1.0; } }
 }
 static void send(Job *j) {
   char q[BATCH * 32 + 96]; int o = snprintf(q, sizeof q, "query{titles(ids:[");
@@ -140,3 +140,5 @@ void kidctl_tick(void) {
   if (nq && !flying) { Job *j = calloc(1, sizeof *j); if (j) { while (nq && j->n < BATCH) snprintf(j->ids[j->n++], 28, "%s", queue[--nq]); send(j); } }
   if (refreshAt && app_now() >= refreshAt && app_idle() > 0.7 && !player_open()) { refreshAt = 0; app_refresh_boards(); } /* titles that may now be shown: the rows are made again */
 }
+
+unsigned kidctl_gen(void) { return gen_; } /* counts the times new ratings arrived: Search asks again then */

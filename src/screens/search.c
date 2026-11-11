@@ -18,6 +18,8 @@
 #include "core/tmdb.h"
 #include "ui/qr.h"
 #include "core/store.h"
+#include "core/kidctl.h"
+#include "core/profile.h"
 
 #define SKEYS "abcdefghijklmnopqrstuvwxyz1234567890"
 #define NK 36
@@ -183,6 +185,7 @@ static void key_rect(int ki, float *x, float *y, float *w) {
 static void logos_ahead(void) { static double at0; double now = app_now(); if (now - at0 < 0.5 || S.zone != 2) return; at0 = now;
   for (int i = S.ri - SGC; i <= S.ri + SGC; i++) { if (i < 0 || i >= S.items.n) continue; char lu[512]; sb_logo_of(&S.items.items[i], lu, sizeof lu); if (lu[0]) img_prefetch_pri(lu, 520, 175); } }
 static void tick(float dt) {
+  if (profile_is_kids()) { static unsigned kg; unsigned g = kidctl_gen(); if (g != kg) { kg = g; if (S.q[0] && SCR == SCR_SEARCH) { S.livePending = 0; live(); } } } /* new ratings came in: what was hidden as unknown is asked again */
   { static unsigned seen; unsigned h = httpd_hits(); if (h != seen) { if (seen && SCR == SCR_SEARCH) app_glow_kick(); seen = h; } } /* the phone opened the page: the glows feel it */
   logos_ahead();
   timer_tick(&S.in, dt); timer_tick(&S.gridIn, dt); nudge_tick(&S.nudge, dt); tween_tick(&S.kfx, dt); tween_tick(&S.caretX, dt); tween_tick(&S.kfy, dt); tween_tick(&S.kfw, dt); tween_tick(&S.sugX, dt); ring_tick(&S.ring, dt); tween_tick(&S.gridY, dt);
