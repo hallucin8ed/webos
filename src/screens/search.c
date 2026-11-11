@@ -17,6 +17,7 @@
 #include "core/httpd.h"
 #include "core/tmdb.h"
 #include "ui/qr.h"
+#include "core/store.h"
 
 #define SKEYS "abcdefghijklmnopqrstuvwxyz1234567890"
 #define NK 36
@@ -43,6 +44,18 @@ static struct {
 static int rows_of(void) { return (NK + SCOLS - 1) / SCOLS; }
 static int key_at(int r, int c) { if (r < rows_of()) return r * SCOLS + c; return NK + (c / 2 < 2 ? c / 2 : 2); } /* the last row: Space, backspace, (clear) */
 static void live(void);
+/* the searches before: the six latest that led to a title being opened, newest first, kept in this profile's own data */
+#define RECENT_MAX 6
+static void recent_show(void) {
+  char buf[900]; snprintf(buf, sizeof buf, "%s", store_get("recentSearch", "")); S.nsug = 0;
+  for (char *sv = NULL, *t = strtok_r(buf, "\n", &sv); t && S.nsug < RECENT_MAX; t = strtok_r(NULL, "\n", &sv)) if (*t) snprintf(S.sug[S.nsug++], 128, "%s", t);
+}
+static void recent_add(void) {
+  char q[48]; snprintf(q, sizeof q, "%s", S.q); char *e = q + strlen(q); while (e > q && e[-1] == ' ') *--e = 0; char *p = q; while (*p == ' ') p++; if (!*p) return;
+  char old[900]; snprintf(old, sizeof old, "%s", store_get("recentSearch", "")); char out[900]; int o = snprintf(out, sizeof out, "%s", p), n = 1;
+  for (char *sv = NULL, *t = strtok_r(old, "\n", &sv); t && n < RECENT_MAX; t = strtok_r(NULL, "\n", &sv)) { if (!*t || !strcasecmp(t, p) || o + (int)strlen(t) + 2 >= (int)sizeof out) continue; o += snprintf(out + o, sizeof out - o, "\n%s", t); n++; }
+  store_set("recentSearch", out);
+}
 static void set_q(const char *q) { snprintf(S.q, sizeof S.q, "%.40s", q); S.liveAt = app_now() + 0.26; S.livePending = 1; }
 static void type_key(int ki) {
   char q[64]; snprintf(q, sizeof q, "%s", S.q); size_t n = strlen(q);
@@ -98,7 +111,7 @@ static void urlenc(const char *s, char *out, size_t cap) { size_t o = 0; for (; 
 static void live(void) {
   char q[48]; snprintf(q, sizeof q, "%s", S.q); char *e = q + strlen(q); while (e > q && e[-1] == ' ') *--e = 0; const char *p = q; while (*p == ' ') p++;
   S.tok++; S.topDone = 0; S.topFail = 0; S.allFailed = 0; for (int c = 0; c < S.ncat; c++) { S.catDone[c] = 0; S.catFail[c] = 0; itemlist_clear(&S.cat[c]); } S.ncat = 0; S.drawn = 1;
-  if (!*p) { itemlist_clear(&S.items); S.nsug = 0; S.loading = 0; S.final = 1; results_draw_state(); return; }
+  if (!*p) { itemlist_clear(&S.items); recent_show(); S.loading = 0; S.final = 1; results_draw_state(); return; }
   S.loading = 1; S.final = 0;
   sb_suggest(p, on_sug, (void *)(uintptr_t)S.tok);
   S.catAt = app_now() + 0.5; S.catPending = 1;
@@ -122,8 +135,9 @@ static void phone_tick(void) {
   if (!S.seqKnown) { S.seqKnown = 1; S.seq = sq; return; } /* what was typed before this visit stays out */
   if (sq > S.seq) { S.seq = sq; S.phone = 1; app_glow_kick(); snprintf(S.q, sizeof S.q, "%.40s", t); S.livePending = 0; live(); }
 }
-static void enter(const void *p) { (void)p; S.zone = (S.zone == 2 && S.items.n) ? 2 : 0; timer_start(&S.in, 0.42f); results_draw_state(); S.typedAt = app_now() - 0.8; phone_ask(); }
+static void enter(const void *p) { (void)p; if (!S.q[0] && !S.items.n) recent_show(); S.zone = (S.zone == 2 && S.items.n) ? 2 : 0; timer_start(&S.in, 0.42f); results_draw_state(); S.typedAt = app_now() - 0.8; phone_ask(); }
 static void leave(void) {} /* Search keeps its query and results for when you come back */
+static void open_result(const Item *it) { recent_add(); app_open_item(it); } /* a title opened from the results: that search is remembered */
 static const Item *focused(void) { return S.zone == 2 && S.ri < S.items.n ? &S.items.items[S.ri] : NULL; }
 static int key(int k) {
   int rows = rows_of(), C = SGC; int z0 = S.zone, kr0 = S.kr, kc0 = S.kc, si0 = S.si, ri0 = S.ri;
@@ -149,7 +163,7 @@ static int key(int k) {
     else if (k == K_RIGHT) { if (c < C - 1 && S.ri < S.items.n - 1) S.ri++; }
     else if (k == K_UP) { if (r > 0) S.ri -= C; else if (S.nsug) S.zone = 1; }
     else if (k == K_DOWN) { if (S.ri + C < S.items.n) S.ri += C; else if (r < (S.items.n - 1) / C) S.ri = S.items.n - 1; }
-    else if (k == K_OK) { app_open_item(&S.items.items[S.ri]); return 1; }
+    else if (k == K_OK) { open_result(&S.items.items[S.ri]); return 1; }
     else if (k == K_BACK) { S.zone = 0; return 1; }
     if (z0 == S.zone && ri0 == S.ri) nudge_start(&S.nudge, k);
   }
@@ -221,9 +235,9 @@ static void draw(void) {
     float ph = fmodf((float)app_now() / 1.1f, 1), p = ease_apply(EASE_IN_OUT, ph), sx = lx + 220 * 0.4f * (-1 + 3.5f * p);
     gfx_rrect_h(sx, ly, 44, 3, 2, col_alpha(ACC2, 0), ACC2); gfx_rrect_h(sx + 44, ly, 44, 3, 2, ACC2, col_alpha(ACC2, 0)); gfx_clip_pop(); }
   else if (S.drawn) { static char h[160], hq[48]; static int hn = -1; static unsigned hLg; /* the hint line: made when the query, the results or the language change */
-    int hs = S.items.n ? 1 : S.allFailed ? 2 : 0;
+    int hs = S.items.n ? 1 : S.allFailed ? 2 : (!S.q[0] && S.nsug) ? 3 : 0;
     if (hLg != i18n_gen() || hn != hs || strcmp(hq, S.q)) { hLg = i18n_gen(); hn = hs; snprintf(hq, sizeof hq, "%s", S.q);
-      if (!S.q[0]) snprintf(h, sizeof h, "%s", T("Type to search films and series")); else if (hs == 2) snprintf(h, sizeof h, "%s", T("Search is unavailable right now. Try again in a moment"));
+      if (!S.q[0]) snprintf(h, sizeof h, "%s", T(hs == 3 ? "Recent searches" : "Type to search films and series")); else if (hs == 2) snprintf(h, sizeof h, "%s", T("Search is unavailable right now. Try again in a moment"));
       else snprintf(h, sizeof h, "%s", T1(S.items.n ? "Results for “{q}”" : "No results for “{q}”", "q", S.q)); }
     text_draw(h, rx, ry, 24, 600, WHITE_A(191), 0, GRID_W, al); }
   ry += text_line_height(24) + 18;
@@ -251,4 +265,4 @@ static void draw(void) {
   gfx_offset_pop(); gfx_opacity_pop(); gfx_clip_pop();
   gfx_offset_pop(); gfx_opacity_pop();
 }
-Screen searchScreen = { enter, leave, key, tick, draw, focused, NULL, NULL };
+Screen searchScreen = { enter, leave, key, tick, draw, focused, open_result, NULL };
