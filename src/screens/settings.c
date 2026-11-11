@@ -54,7 +54,7 @@ static const Opt COLORS[] = { { "#ffffff", "White" }, { "#ffe600", "Yellow" }, {
 static const Opt OUTL[] = { { "#000000", "Black" }, { "#ffffff", "White" } };
 static const Opt BGS[] = { { "0", "None" }, { "1", "Solid" }, { ".6", "Transparent" } };
 static const Opt ASSO[] = { { "styled", "Styled" }, { "plain", "Plain" } };
-static const Opt PC_AGE[] = { { "0", "Only titles I allow" }, { "4", "U" }, { "8", "PG" }, { "12", "12" }, { "15", "15" } };
+static const Opt PC_AGE[] = { { "0", "Only titles I allow" }, { "5", "Age 5" }, { "6", "Age 6" }, { "7", "Age 7" }, { "8", "Age 8" }, { "9", "Age 9" }, { "10", "Age 10" }, { "11", "Age 11" }, { "12", "Age 12" }, { "13", "Age 13" }, { "14", "Age 14" }, { "15", "Age 15" }, { "16", "Age 16" } };
 static const Opt PC_FROM[] = { { "18:00", "18:00" }, { "18:30", "18:30" }, { "19:00", "19:00" }, { "19:30", "19:30" }, { "20:00", "20:00" }, { "20:30", "20:30" }, { "21:00", "21:00" }, { "21:30", "21:30" }, { "22:00", "22:00" }, { "23:00", "23:00" } };
 static const Opt PC_TO[] = { { "05:00", "05:00" }, { "05:30", "05:30" }, { "06:00", "06:00" }, { "06:30", "06:30" }, { "07:00", "07:00" }, { "07:30", "07:30" }, { "08:00", "08:00" }, { "08:30", "08:30" }, { "09:00", "09:00" } };
 static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" }, { "5", "5 min" }, { "10", "10 min" } };
@@ -192,7 +192,7 @@ static void build(void) {
     for (int j = 0; j < 10 && n < 40; j++) { int have = 0; for (int i = 0; i < i18n_lang_count(); i++) if (!strcmp(i18n_lang_code(i), ORDER[j])) have = 1; if (!have) continue;
       snprintf(s->dynS[n], 64, "%s", ORDER[j]); s->dyn[n].v = s->dynS[n]; s->dyn[n].lb = i18n_lang_name(ORDER[j]); n++; }
     s->opts = s->dyn; s->nopts = n; }
-  set_s(&pcS[0], "pcRating", "Kids: age rating limit", "Titles rated above it are hidden in Kids, and those with no rating. Allow or block one title from its menu (hold OK)", PC_AGE, 5, "8");
+  set_s(&pcS[0], "pcAge", "Kids: age", "Kids sees what is rated suitable for this age or younger (UK or US rating). Titles with no rating are hidden. Allow or block one title from its menu (hold OK)", PC_AGE, 13, "10");
   set_s(&pcS[1], "pcLists", "Kids: lists from addons", "Titles in the catalogues of list addons installed on the Kids account are allowed", OO, 2, "true");
   set_s(&pcS[2], "pcTorrents", "Kids: torrents", "Off: the Kids profile never plays a torrent", OO, 2, "false");
   set_s(&pcS[3], "pcBed", "Kids: bedtime lock", "The Kids profile closes and will not open between the two times", OO, 2, "false");

@@ -28,7 +28,7 @@ static void base_id(const char *id, char out[28]) { size_t n = 0; while (id && i
 
 static Tab marks, listed, ages;   /* marks: 1 allowed, 2 blocked; ages: -1 no rating, 0.. the age, -3 asked */
 static char baseDir[1024];
-static int maxAge = 8, listsOn = 1, torrents, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60;
+static int maxAge = 10, listsOn = 1, torrents, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60;
 static int hhmm(const char *s, int def) { int h, m; return s && sscanf(s, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60 ? h * 60 + m : def; }
 
 /* ---- ages on disk: "id age", appended as they are learnt ---- */
@@ -43,7 +43,7 @@ static void append(const char *path, const char *id, int v, int withVal) { FILE 
 
 void kidctl_capture(const char *dir) {
   snprintf(baseDir, sizeof baseDir, "%s", dir);
-  maxAge = atoi(store_get("pcRating", "8")); listsOn = strcmp(store_get("pcLists", "true"), "false") != 0; torrents = !strcmp(store_get("pcTorrents", "false"), "true");
+  maxAge = atoi(store_get("pcAge", "10")); listsOn = strcmp(store_get("pcLists", "true"), "false") != 0; torrents = !strcmp(store_get("pcTorrents", "false"), "true");
   bedOn = !strcmp(store_get("pcBed", "false"), "true"); bedFrom = hhmm(store_get("pcBedFrom", "19:30"), 19 * 60 + 30); bedTo = hhmm(store_get("pcBedTo", "07:00"), 7 * 60);
   const cJSON *x; char b[28];
   cJSON_ArrayForEach(x, store_node("pcAllow")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_ALLOWED; }
@@ -77,7 +77,7 @@ void kidctl_set_mark(const char *id, int mark) {
 /* ---- age ratings ---- */
 static int age_of(const char *r) {
   static const struct { const char *r; int a; } M[] = { { "U", 4 }, { "UC", 4 }, { "G", 4 }, { "TV-Y", 4 }, { "TV-G", 4 }, { "TV-Y7", 7 }, { "TV-Y7-FV", 7 }, { "PG", 8 }, { "TV-PG", 8 },
-    { "12", 12 }, { "12A", 12 }, { "PG-13", 12 }, { "TV-14", 14 }, { "15", 15 }, { "R", 17 }, { "18", 18 }, { "R18", 18 }, { "TV-MA", 18 }, { "NC-17", 18 }, { "X", 18 } };
+    { "12", 12 }, { "12A", 12 }, { "PG-13", 13 }, { "TV-14", 14 }, { "15", 15 }, { "R", 17 }, { "18", 18 }, { "R18", 18 }, { "TV-MA", 18 }, { "NC-17", 18 }, { "X", 18 } };
   if (!r) return -1;
   for (size_t i = 0; i < sizeof M / sizeof M[0]; i++) if (!strcasecmp(M[i].r, r)) return M[i].a;
   return -1;
