@@ -31,6 +31,10 @@
 #include <string.h>
 #include <strings.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <signal.h>
+#include <sys/prctl.h>
+#include <sys/wait.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
@@ -247,8 +251,43 @@ static bool on_screensaver(LSHandle *h, LSMessage *m, void *u) {
   char b[256]; if (ss_answer(p, b, sizeof b)) call_uri(SS_RESPONSE, b, NULL, NULL);
   return true;
 }
+/* webOS 6.5 refuses these requests to the app's own luna handles ("Not permitted") but not to the system's luna-send tool
+   (the same way a root shell on the TV is let through): so a luna-send of its own listens and answers for the app. It ends
+   with the app (PDEATHSIG), and gives up after three refusals */
+#define LUNA_SEND "/usr/bin/luna-send"
+static volatile int ssSpawned;
+static pid_t ss_exec(int rfd[2], char *const argv[]) {
+  if (rfd && pipe(rfd)) return -1;
+  pid_t pid = fork(); if (pid < 0) return -1;
+  if (!pid) { prctl(PR_SET_PDEATHSIG, SIGKILL); int nul = open("/dev/null", O_RDWR); if (rfd) dup2(rfd[1], 1); else dup2(nul, 1); dup2(nul, 2);
+    for (int fd = 3; fd < 256; fd++) close(fd); execv(LUNA_SEND, argv); _exit(127); }
+  if (rfd) close(rfd[1]);
+  return pid;
+}
+static void *ss_thread(void *u) {
+  (void)u; int refused = 0;
+  while (refused < 3) {
+    char b[160]; snprintf(b, sizeof b, "{\"subscribe\":true,\"clientName\":\"%s\"}", SB_APP_ID);
+    int fd[2]; char *sub[] = { "luna-send", "-i", (char *)SS_REGISTER, b, NULL }; pid_t pid = ss_exec(fd, sub); if (pid < 0) return NULL;
+    FILE *f = fdopen(fd[0], "r"); if (!f) { close(fd[0]); return NULL; }
+    char msg[1024]; int n = 0, depth = 0, c, good = 0;
+    while ((c = getc(f)) != EOF) {
+      if (c == '{') { if (depth++ == 0) n = 0; }
+      if (depth > 0 && c != ' ' && c != '\n' && c != '\r' && c != '\t' && n < (int)sizeof msg - 1) msg[n++] = (char)c; /* (compact: no spaces to match around) */
+      if (c == '}' && depth > 0 && --depth == 0) { msg[n] = 0;
+        if (failed(msg)) { log_payload("screen saver request refused for luna-send too:", msg); refused++; break; }
+        if (strstr(msg, "\"subscribed\":true") && !good) { good = 1; refused = 0; fprintf(stderr, "[video] screen saver: answering through luna-send\n"); }
+        char a[256]; if (ss_answer(msg, a, sizeof a)) { char *ans[] = { "luna-send", "-n", "1", (char *)SS_RESPONSE, a, NULL }; pid_t q = ss_exec(NULL, ans); int st; if (q > 0) waitpid(q, &st, 0); } } }
+    fclose(f); kill(pid, SIGKILL); int st; waitpid(pid, &st, 0);
+    if (!good) refused++;
+    sleep(good ? 2 : 5);
+  }
+  fprintf(stderr, "[video] screen saver: luna-send was refused too; the TV's screen saver is not held off\n");
+  return NULL;
+}
+static void ss_start_helper(void) { if (ssSpawned) return; ssSpawned = 1; pthread_t th; if (!pthread_create(&th, NULL, ss_thread, NULL)) pthread_detach(th); }
 static void on_screensaver_app(const char *p, void *ud) { /* main thread, from plat_luna_pump */
-  (void)ud; if (failed(p)) { log_payload("screen saver request refused:", p); return; }
+  (void)ud; if (failed(p)) { log_payload("screen saver request refused:", p); ss_start_helper(); return; }
   char b[256]; if (ss_answer(p, b, sizeof b)) plat_luna_send(SS_RESPONSE, b);
 }
 
@@ -394,7 +433,7 @@ int video_set_crop(int sx, int sy, int sw, int sh, float dx, float dy, float dw,
 }
 void video_pump(void) {
   if (ssRefused == 1) { ssRefused = 2; char b[160]; snprintf(b, sizeof b, "{\"subscribe\":true,\"clientName\":\"%s\"}", SB_APP_ID);
-    fprintf(stderr, "[video] screen saver requests through the app's luna handle: %s\n", plat_luna_subscribe(SS_REGISTER, b, on_screensaver_app, NULL) ? "asked" : "not possible"); }
+    { int ok = plat_luna_subscribe(SS_REGISTER, b, on_screensaver_app, NULL); fprintf(stderr, "[video] screen saver requests through the app's luna handle: %s\n", ok ? "asked" : "not possible"); if (!ok) ss_start_helper(); } }
   int bind = 0, again = 0, died = 0; double pos = 0; int aud = 0, txt = -1, loaded = 0;
   pthread_mutex_lock(&mu);
   if (S.bindWanted & 1) bind = acb != 0; if (S.bindWanted & 2) again = 1; S.bindWanted = 0;
