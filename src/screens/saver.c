@@ -23,6 +23,9 @@
 #define SSW 1280
 #define SSH 720
 #define MAXSS 16
+#ifndef SB_APP_ID
+#define SB_APP_ID "tv.stremioorigin.app"
+#endif
 extern int board_saver_items(Item *out, int max);
 typedef struct { GfxTarget t; int ok, kb; double at; Tween a; } SsLayer;
 static struct {
@@ -37,6 +40,22 @@ static struct {
   /* the clock's and the mark's glass, flowing to their places: where they are, how fast */
   float cX, cY, cVX, cVY, mX, mY, mVX, mVY; int flowInit;
 } SS;
+
+/* The root screensaver helper (ss-helper.js) answers the TV's "may the LG screensaver start?" for us, since the app
+   isn't allowed to. It can't tell a playing film from an idle poster screensaver, so we tell it: every few seconds we
+   write /tmp/<appid>-ss-hold as "1 <epoch>" to hold the LG screensaver off, or "0 <epoch>" to let it through. We hold
+   while a film plays, and while our own poster screensaver has been up for less than the handoff time (default 15 min,
+   store key "ssHandoff"); after that we release, so the TV's own power saving can take over. The epoch lets the helper
+   ignore a stale file if the app has gone and fall back to its own judgement. */
+static void ss_hold_update(void) {
+  static double last = 0; double now = app_now();
+  if (last && now - last < 3.0) return; last = now;
+  int hold = 0;
+  if (player_open() && !player_paused()) hold = 1;                 /* a film is playing: hold, however long it runs */
+  else if (SS.on) { double mins = atof(store_get("ssHandoff", "15")); if (mins > 0 && (now - SS.startAt) / 60.0 < mins) hold = 1; }
+  char path[256]; snprintf(path, sizeof path, "/tmp/%s-ss-hold", SB_APP_ID);
+  FILE *f = fopen(path, "w"); if (f) { fprintf(f, "%d %ld\n", hold, (long)time(NULL)); fclose(f); }
+}
 
 /* elsewhere than Home (a page, the guide, the sign-in): no screensaver, the screen only dims; a key brings it back */
 static int dimOn; static Tween dimA;
@@ -118,6 +137,7 @@ static void shift(void) {
 }
 void saver_tick(float dt) {
   double now = app_now();
+  ss_hold_update();
   tween_tick(&SS.fade, dt); tween_tick(&dimA, dt);
   if (dimOn && (player_open() || app_idle() < 1)) { dimOn = 0; tween_to(&dimA, 0, 0.35f, EASE_CSS_EASE); }
   if (!SS.on) {
