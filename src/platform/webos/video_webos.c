@@ -432,6 +432,7 @@ int video_set_crop(int sx, int sy, int sw, int sh, float dx, float dy, float dw,
   return !noCrop;
 }
 void video_pump(void) {
+  if (ssRefused == 1 && !access("/tmp/ss-helper.active", F_OK)) { ssRefused = 2; fprintf(stderr, "[video] screen saver: the root helper answers for us; not registering\n"); } /* a second, silent registration under our name could undo its answer */
   if (ssRefused == 1) { ssRefused = 2; char b[160]; snprintf(b, sizeof b, "{\"subscribe\":true,\"clientName\":\"%s\"}", SB_APP_ID);
     { int ok = plat_luna_subscribe(SS_REGISTER, b, on_screensaver_app, NULL); fprintf(stderr, "[video] screen saver requests through the app's luna handle: %s\n", ok ? "asked" : "not possible"); if (!ok) ss_start_helper(); } }
   int bind = 0, again = 0, died = 0; double pos = 0; int aud = 0, txt = -1, loaded = 0;
