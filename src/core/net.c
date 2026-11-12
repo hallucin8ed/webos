@@ -19,6 +19,7 @@ static CURLcode (*f_easy_setopt)(CURL *, CURLoption, ...);
 static CURLcode (*f_easy_perform)(CURL *);
 static CURLcode (*f_easy_getinfo)(CURL *, CURLINFO, ...);
 static void (*f_easy_cleanup)(CURL *);
+static void (*f_easy_reset)(CURL *);  /* (optional: without it, a new handle per request as before) */
 static struct curl_slist *(*f_slist_append)(struct curl_slist *, const char *);
 static void (*f_slist_free_all)(struct curl_slist *);
 static CURLcode (*f_global_init)(long);
@@ -30,6 +31,7 @@ static int resolve(void) {
 #ifdef SB_MAC
   f_easy_init = curl_easy_init; f_easy_setopt = curl_easy_setopt; f_easy_perform = curl_easy_perform; f_easy_getinfo = curl_easy_getinfo;
   f_easy_cleanup = curl_easy_cleanup; f_slist_append = curl_slist_append; f_slist_free_all = curl_slist_free_all; f_global_init = curl_global_init;
+  f_easy_reset = curl_easy_reset;
   return 1;
 #else
   static const char *names[] = { "libcurl.so.5", "libcurl.so.4", "libcurl.so", NULL };
@@ -39,6 +41,7 @@ static int resolve(void) {
   L(f_easy_init, "curl_easy_init"); L(f_easy_setopt, "curl_easy_setopt"); L(f_easy_perform, "curl_easy_perform"); L(f_easy_getinfo, "curl_easy_getinfo");
   L(f_easy_cleanup, "curl_easy_cleanup"); L(f_slist_append, "curl_slist_append"); L(f_slist_free_all, "curl_slist_free_all"); L(f_global_init, "curl_global_init");
 #undef L
+  *(void **)(&f_easy_reset) = dlsym(h, "curl_easy_reset");
   return 1;
 #endif
 }
@@ -76,8 +79,25 @@ static size_t on_header(char *p, size_t s, size_t n, void *ud) {
   return len;
 }
 static size_t on_size_data(char *p, size_t s, size_t n, void *ud) { (void)p; (void)s; (void)n; (void)ud; return 0; } /* never the body: a 200 would be the whole film */
+/* one curl handle per thread, kept from request to request: curl keeps its connections open, so the next request to
+   the same server (the next poster from the same image host, the next catalogue) skips the TCP connect and the TLS
+   handshake - slow on the TV's CPU with OpenSSL 1.0 - and its DNS answer is kept too. Reset before each request: no
+   option of the last one carries over */
+static __thread CURL *thHandle;
+static pthread_key_t thKey; static pthread_once_t thOnce = PTHREAD_ONCE_INIT;
+static void th_end(void *c) { if (c) f_easy_cleanup((CURL *)c); } /* a thread that ends (a subtitle search...) closes its own */
+static void th_key(void) { pthread_key_create(&thKey, th_end); }
+static CURL *handle_get(void) {
+  if (!f_easy_reset) return f_easy_init();
+  if (thHandle) { f_easy_reset(thHandle); return thHandle; }
+  pthread_once(&thOnce, th_key);
+  thHandle = f_easy_init(); if (thHandle) pthread_setspecific(thKey, thHandle);
+  return thHandle;
+}
+static void handle_done(CURL *c) { if (c && c != thHandle) f_easy_cleanup(c); }
+
 static void perform(Req *r) {
-  CURL *c = f_easy_init(); if (!c) { r->status = 0; return; }
+  CURL *c = handle_get(); if (!c) { r->status = 0; return; }
   struct curl_slist *hs = NULL;
   f_easy_setopt(c, CURLOPT_URL, r->url); f_easy_setopt(c, CURLOPT_WRITEFUNCTION, on_data); f_easy_setopt(c, CURLOPT_WRITEDATA, r);
   f_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L); f_easy_setopt(c, CURLOPT_MAXREDIRS, 8L); f_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
@@ -95,8 +115,8 @@ static void perform(Req *r) {
   long code = 0; f_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
   r->status = rc == CURLE_OK ? (int)code : 0;
   if (r->size) { char t[32]; int k = snprintf(t, sizeof t, "%.0f", r->total > 0 ? r->total : 0); free(r->body); r->body = (unsigned char *)strdup(t); r->len = (size_t)k; r->status = (int)code; } /* the server's answer even without a size (a 404 says why a film will not play); 0 = no answer */
+  handle_done(c);
   if (hs) f_slist_free_all(hs);
-  f_easy_cleanup(c);
 }
 static void parse_body(Req *r) {
   if (r->body && r->len > 1 && r->len < 16u * 1024 * 1024 && r->status >= 200 && r->status < 300) { const unsigned char *b = r->body; while (*b == ' ' || *b == '\n' || *b == '\r' || *b == '\t') b++; if (*b == '{' || *b == '[') r->json = cJSON_ParseWithLength((const char *)r->body, r->len); }
@@ -258,14 +278,14 @@ void net_pump(void) {
 unsigned char *net_fetch_sync(const char *url, size_t *len, int *status, int timeoutMs) { return net_fetch_sync_hdr(url, NULL, len, status, timeoutMs); }
 unsigned char *net_fetch_sync_hdr(const char *url, const char *hdr, size_t *len, int *status, int timeoutMs) {
   Req r; memset(&r, 0, sizeof r); r.url = (char *)url;
-  CURL *c = f_easy_init(); if (!c) { *status = 0; *len = 0; return NULL; }
+  CURL *c = handle_get(); if (!c) { *status = 0; *len = 0; return NULL; }
   struct curl_slist *hs = hdr ? f_slist_append(NULL, hdr) : NULL; if (hs) f_easy_setopt(c, CURLOPT_HTTPHEADER, hs);
   f_easy_setopt(c, CURLOPT_URL, url); f_easy_setopt(c, CURLOPT_WRITEFUNCTION, on_data); f_easy_setopt(c, CURLOPT_WRITEDATA, &r);
   f_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L); f_easy_setopt(c, CURLOPT_MAXREDIRS, 8L); f_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
   f_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 8000L); f_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long)timeoutMs);
   f_easy_setopt(c, CURLOPT_USERAGENT, ua()); f_easy_setopt(c, CURLOPT_ACCEPT_ENCODING, "");
   if (caPath[0]) f_easy_setopt(c, CURLOPT_CAINFO, caPath);
-  CURLcode rc = f_easy_perform(c); long code = 0; f_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code); f_easy_cleanup(c); if (hs) f_slist_free_all(hs);
+  CURLcode rc = f_easy_perform(c); long code = 0; f_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code); handle_done(c); if (hs) f_slist_free_all(hs);
   *status = rc == CURLE_OK ? (int)code : 0; *len = r.len;
   if (*status != 200 && *status != 206) { free(r.body); return NULL; }
   return r.body;

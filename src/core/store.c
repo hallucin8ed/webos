@@ -127,6 +127,7 @@ static void *prune_run(void *a) { (void)a; plat_thread_background(15);
     for (int i = 0; i < n && total > goal; i++) { char p[1200]; snprintf(p, sizeof p, "%s/%s", d, e[i].name); if (!remove(p)) { total -= e[i].size; del++; } }
     fprintf(stderr, "[cache] %d files removed, %ld KB kept\n", del, total / 1024); }
   __atomic_store_n(&keptBytes, total, __ATOMIC_RELAXED);
+  if (u) { char st[1200]; snprintf(st, sizeof st, "%s/.pruned", d); FILE *f = fopen(st, "wb"); if (f) fclose(f); } /* when the drive was last tidied */
   free(e); return NULL;
 }
 void cache_prune_start(int capMb) { capBytes = (long)capMb * 1024 * 1024; pthread_t t; if (!pthread_create(&t, NULL, prune_run, NULL)) pthread_detach(t); }
@@ -139,6 +140,10 @@ int cache_use_usb(const char *root, int capMb) {
   FILE *f = fopen(t, "wb"); if (!f) return 0; int ok = fputs("ok", f) >= 0; if (fclose(f)) ok = 0; remove(t); if (!ok) return 0;
   for (int i = 0; i < 256; i++) { snprintf(t, sizeof t, "%s/%02x", root, i); mkdir(t, 0755); }
   usbIx ^= 1; snprintf(usbBuf[usbIx], sizeof usbBuf[0], "%s", root); usbRoot = usbBuf[usbIx];
+  /* tidied at most once a day: on a full drive that is tens of thousands of files to look at, and it would compete with
+     the pictures loading after every start (and every profile switch) */
+  snprintf(t, sizeof t, "%s/.pruned", root); struct stat sp;
+  if (!stat(t, &sp) && time(NULL) - sp.st_mtime < 86400) { capBytes = (long)capMb * 1024 * 1024; fprintf(stderr, "[cache] the USB drive was tidied in the last day\n"); return 1; }
   cache_prune_start(capMb); return 1;
 }
 int cache_file(const char *key, long maxAge, char *p, size_t cap) {
