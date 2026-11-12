@@ -85,6 +85,7 @@ static void on_crash(int sig, siginfo_t *si, void *uc) {
 static int vsyncOn __attribute__((unused));   /* SB_VSYNC=1: let the driver wait for the screen instead of pacing ourselves */
 #include "core/net.h"
 #include "core/store.h"
+#include "core/usb.h"
 #include "core/i18n.h"
 #include "core/stremio.h"
 #include "screens/board.h"
@@ -108,6 +109,19 @@ static int vsyncOn __attribute__((unused));   /* SB_VSYNC=1: let the driver wait
 #endif
 #define APP_ID SB_APP_ID   /* the package id: tools/build.sh APPID=... */
 
+/* pictures on the USB drive when one is plugged in (Settings > Playback > Cache pictures on USB, on unless switched
+   off): up to 8 GB there, against 40 MB on the TV's own small partition. Looked at once a second: a drive that comes,
+   goes or is switched off moves the cache */
+static void cache_place(void) {
+  static Uint32 at; static char cur[700]; Uint32 now = SDL_GetTicks(); if (at && now - at < 1000) return; at = now;
+  UsbDrive d; char root[700] = "";
+  if (usb_drive(&d)) { char k[128]; snprintf(k, sizeof k, "usbImg_%s", d.id); if (strcmp(store_get(k, "true"), "false")) snprintf(root, sizeof root, "%s/%s-cache", d.mnt, SB_APP_ID); }
+  if (!strcmp(root, cur)) return;
+  snprintf(cur, sizeof cur, "%s", root); /* (once per change, even when the drive can't be written: no retry each second) */
+  if (!root[0]) { cache_use_usb(NULL, 40); fprintf(stderr, "[cache] pictures on the TV\n"); }
+  else if (cache_use_usb(root, 8192)) fprintf(stderr, "[cache] pictures on the USB drive: %s (up to 8 GB)\n", root);
+  else fprintf(stderr, "[cache] the USB drive can't be written; pictures stay on the TV\n");
+}
 static void screenshot(const char *path, int w, int h) {
   unsigned char *px = malloc((size_t)w * h * 4), *flip = malloc((size_t)w * h * 4);
   glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, px);
@@ -293,6 +307,7 @@ int main(int argc, char **argv) {
       else if (ask == PROFILE_ASK_SWITCH) { fprintf(stderr, "[profile] back to the profile screen\n"); again = 1; app_quit(); } }
     { static Uint32 bedAt; if (profile_is_kids() && SDL_GetTicks() - bedAt > 20000) { bedAt = SDL_GetTicks(); if (kidctl_bedtime(NULL, 0)) { fprintf(stderr, "[kids] bedtime\n"); again = 1; app_quit(); } } }
     kidctl_tick();
+    cache_place();
     Uint32 now = SDL_GetTicks(); float dt = (now - last) / 1000.0f; last = now;
     { float pp = (float)pace_period() / 1000.0f; if (pp <= 0) pp = 1 / 60.0f; /* motion on the 60 Hz clock: an on-time frame is one period (no millisecond jitter); a slow one moves it 3 periods at most (no jump) */
       if (dt > pp * 0.5f && dt < pp * 1.5f) dt = pp; else if (dt > pp * 3) dt = pp * 3; }

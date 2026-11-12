@@ -65,7 +65,7 @@ static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" 
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
 #define NCAT 11
 #define MAXROWS 48
-static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[8], rowS[46];
+static Setting playBase[9], playS[10], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[8], rowS[46];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -162,7 +162,7 @@ static int about_opts(void) {
 static unsigned usbSeen;
 /* Playback's rows as shown: the best stream first; the trailers' volume right under the trailers' switch while they are on, else not at all;
    Dolby Vision for Blu-ray copies only on a TV with Dolby Vision */
-static int iUsb = 5;
+static int iUsb = 5, usbImgRow;
 static void play_layout(void) {
   int on = strcmp(store_get("bgTrailer", "true"), "false") != 0, n = 0;
   playS[n++] = playBase[4]; /* the best stream first */
@@ -170,14 +170,16 @@ static void play_layout(void) {
   if (on) playS[n++] = playBase[6];
   const TvCaps *tc = best_caps(); if (tc && tc->dv) playS[n++] = playBase[7];
   iUsb = n; playS[n++] = playBase[5];
+  if (usbImgRow) playS[n++] = playBase[8]; /* the pictures, right under the torrents, while a drive is there */
   for (int i = 0; i < ncat; i++) if (cats[i].opts == playS) { cats[i].n = n; if (S.cat == i && S.idx >= n) S.idx = n - 1; }
 }
 static void usb_row(void) {
   Setting *s = &playBase[5]; UsbDrive d; usbSeen = usb_serial();
   if (usb_drive(&d)) { char k[128], gb[16]; snprintf(k, sizeof k, "usbCache_%s", d.id); set_s(s, k, T("Cache torrents on USB"), "", OO, 2, "false"); s->raw = 1;
     snprintf(gb, sizeof gb, "%.*f", d.freeMb >= 10240 ? 0 : 1, d.freeMb / 1024.0);
-    snprintf(s->ds, sizeof s->ds, "%s · %s. %s", d.name[0] ? d.name : T("USB drive"), T1("{n} GB free", "n", gb), T("Faster seeks and less memory used")); }
-  else { set_s(s, "__usbNone", T("Cache torrents on USB"), usb_unreachable(NULL, 0) ? T("USB drive plugged in after the app started: restart the TV to use it") : T("Plug in a USB drive to keep torrents on it"), NULL, 0, ""); s->raw = 1; s->off = 1; }
+    snprintf(s->ds, sizeof s->ds, "%s · %s. %s", d.name[0] ? d.name : T("USB drive"), T1("{n} GB free", "n", gb), T("Faster seeks and less memory used"));
+    char ki[128]; snprintf(ki, sizeof ki, "usbImg_%s", d.id); set_s(&playBase[8], ki, T("Cache pictures on USB"), T("Posters and backgrounds kept on the drive (up to 8 GB, 90 days), so pages open faster"), OO, 2, "true"); playBase[8].raw = 1; usbImgRow = 1; }
+  else { usbImgRow = 0; set_s(s, "__usbNone", T("Cache torrents on USB"), usb_unreachable(NULL, 0) ? T("USB drive plugged in after the app started: restart the TV to use it") : T("Plug in a USB drive to keep torrents on it"), NULL, 0, ""); s->raw = 1; s->off = 1; }
 }
 static void caps_known(const TvCaps *c, void *ud) { (void)c; (void)ud; play_layout(); S.dirty = 1; }
 static void build(void) {

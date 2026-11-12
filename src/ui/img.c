@@ -105,7 +105,7 @@ static void small_save(const Img *im, const unsigned char *px, int w, int h) {
 }
 static int small_load(Img *im) {
   char key[2400]; snprintf(key, sizeof key, "sm:%dx%d:%s", im->w, im->h, im->url);
-  size_t len = 0; unsigned char *data = cache_read(key, 14 * 86400, &len); if (!data) return 0;
+  size_t len = 0; unsigned char *data = cache_read(key, cache_on_usb() ? 90L * 86400 : 14 * 86400, &len); if (!data) return 0;
   int w, h, ch; unsigned char *px = stbi_load_from_memory(data, (int)len, &w, &h, &ch, 4); free(data);
   if (!px) return 0;
   if (im->wantPal && !im->palReady) { int st = 1; while ((w / st) * (h / st) > 40000) st++; palette_of(px, w, h, im->palAlpha, st, &im->pal); im->palReady = 1; }
@@ -121,7 +121,7 @@ static double mono_s(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &
 static void load(Img *im) { dec_enter(); int ok = small_load(im); dec_leave(); if (!ok) load_(im); }
 static void load_(Img *im) {
   char key[2048]; snprintf(key, sizeof key, "img:%s", im->src);
-  size_t len = 0; unsigned char *data = cache_read(key, 14 * 86400, &len);
+  size_t len = 0; unsigned char *data = cache_read(key, cache_on_usb() ? 90L * 86400 : 14 * 86400, &len);
   int fromNet = 0;
   if (!data && !strncmp(im->src, "file://", 7)) { FILE *f = fopen(im->src + 7, "rb"); if (f) { fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET); if (n > 0) { data = malloc(n); len = fread(data, 1, n, f); } fclose(f); } } /* a bundled picture */
   else if (!data) { int st; data = net_fetch_sync(im->src, &len, &st, 20000); fromNet = 1; }

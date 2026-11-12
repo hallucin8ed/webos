@@ -87,9 +87,15 @@ void store_pump(void) {
 }
 
 /* ---- file cache ---------------------------------------------------------------------------- */
+/* the cache's folder: <data>/cache on the TV, or one on a USB drive, spread over 256 folders there (a FAT32 folder
+   holds about 65,000 files). Swapped by pointer so the worker threads never read a half-written name */
+static char usbBuf[2][1100]; static const char *volatile usbRoot; static int usbIx;
+int cache_on_usb(void) { return usbRoot != NULL; }
 static void cache_path(const char *key, char *out, size_t cap) {
   unsigned long long h1 = 1469598103934665603ULL; unsigned h2 = 2166136261u; for (const unsigned char *p = (const unsigned char *)key; *p; p++) { h1 = (h1 ^ *p) * 1099511628211ULL; h2 = (h2 ^ *p) * 16777619u; }
-  snprintf(out, cap, "%s/cache/%016llx%08x", dir, h1, h2);
+  const char *u = usbRoot;
+  if (u) snprintf(out, cap, "%s/%02x/%016llx%08x", u, h2 & 0xff, h1, h2);
+  else snprintf(out, cap, "%s/cache/%016llx%08x", dir, h1, h2);
 }
 unsigned char *cache_read(const char *key, long maxAge, size_t *len) {
   char p[1200]; cache_path(key, p, sizeof p);
@@ -107,11 +113,16 @@ static long capBytes, keptBytes = -1;
 long cache_cap_bytes(void) { return capBytes; }
 long cache_kept_bytes(void) { return __atomic_load_n(&keptBytes, __ATOMIC_RELAXED); }
 static void *prune_run(void *a) { (void)a; plat_thread_background(15);
-  char d[1100]; snprintf(d, sizeof d, "%s/cache", dir); DIR *dd = opendir(d); if (!dd) return NULL;
+  const char *u = usbRoot; char d[1100]; if (u) snprintf(d, sizeof d, "%s", u); else snprintf(d, sizeof d, "%s/cache", dir);
   int n = 0, cap = 4096; CEnt *e = malloc(cap * sizeof *e); long total = 0; struct dirent *de;
-  while ((de = readdir(dd))) { if (de->d_name[0] == '.' || strlen(de->d_name) >= sizeof e[0].name) continue; char p[1200]; snprintf(p, sizeof p, "%s/%s", d, de->d_name); struct stat st; if (stat(p, &st) || !S_ISREG(st.st_mode)) continue;
-    if (n == cap) { cap *= 2; e = realloc(e, cap * sizeof *e); } snprintf(e[n].name, sizeof e[n].name, "%s", de->d_name); e[n].at = st.st_atime > st.st_mtime ? st.st_atime : st.st_mtime; e[n].size = st.st_size; total += st.st_size; n++; }
-  closedir(dd);
+  for (int sh = u ? 0 : -1; sh < (u ? 256 : 0); sh++) { /* the one folder on the TV, the 256 on a drive */
+    char sd[1200]; if (sh < 0) snprintf(sd, sizeof sd, "%s", d); else snprintf(sd, sizeof sd, "%s/%02x", d, sh);
+    DIR *dd = opendir(sd); if (!dd) continue;
+    while ((de = readdir(dd))) { if (de->d_name[0] == '.' || strlen(de->d_name) >= sizeof e[0].name - 3) continue; char p[1300]; snprintf(p, sizeof p, "%s/%s", sd, de->d_name); struct stat st; if (stat(p, &st) || !S_ISREG(st.st_mode)) continue;
+      if (n == cap) { cap *= 2; e = realloc(e, cap * sizeof *e); }
+      if (sh < 0) snprintf(e[n].name, sizeof e[n].name, "%s", de->d_name); else snprintf(e[n].name, sizeof e[n].name, "%02x/%s", sh, de->d_name);
+      e[n].at = st.st_atime > st.st_mtime ? st.st_atime : st.st_mtime; e[n].size = st.st_size; total += st.st_size; n++; }
+    closedir(dd); }
   if (total > capBytes) { qsort(e, n, sizeof *e, cent_cmp); long goal = capBytes * 3 / 4; int del = 0;
     for (int i = 0; i < n && total > goal; i++) { char p[1200]; snprintf(p, sizeof p, "%s/%s", d, e[i].name); if (!remove(p)) { total -= e[i].size; del++; } }
     fprintf(stderr, "[cache] %d files removed, %ld KB kept\n", del, total / 1024); }
@@ -119,6 +130,17 @@ static void *prune_run(void *a) { (void)a; plat_thread_background(15);
   free(e); return NULL;
 }
 void cache_prune_start(int capMb) { capBytes = (long)capMb * 1024 * 1024; pthread_t t; if (!pthread_create(&t, NULL, prune_run, NULL)) pthread_detach(t); }
+/* the cache moves to a folder on a USB drive (root), or back to the TV (NULL); capMb: the size kept there. 0: the drive
+   can't be written */
+int cache_use_usb(const char *root, int capMb) {
+  if (!root) { if (usbRoot) { usbRoot = NULL; cache_prune_start(capMb); } return 1; }
+  if (usbRoot && !strcmp(usbRoot, root)) return 1;
+  mkdir(root, 0755); char t[1200]; snprintf(t, sizeof t, "%s/.write-test", root);
+  FILE *f = fopen(t, "wb"); if (!f) return 0; int ok = fputs("ok", f) >= 0; if (fclose(f)) ok = 0; remove(t); if (!ok) return 0;
+  for (int i = 0; i < 256; i++) { snprintf(t, sizeof t, "%s/%02x", root, i); mkdir(t, 0755); }
+  usbIx ^= 1; snprintf(usbBuf[usbIx], sizeof usbBuf[0], "%s", root); usbRoot = usbBuf[usbIx];
+  cache_prune_start(capMb); return 1;
+}
 int cache_file(const char *key, long maxAge, char *p, size_t cap) {
   cache_path(key, p, cap); struct stat st; if (stat(p, &st)) return 0;
   return !(maxAge > 0 && time(NULL) - st.st_mtime > maxAge);
