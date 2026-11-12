@@ -38,6 +38,9 @@ unsigned sb_lib_sync_age(void);        /* ms since the last library pull began (
 cJSON *sb_addons(void);                /* the installed addon list (array), including those off on this TV */
 int  sb_addon_on(const cJSON *addon);  /* not switched off on this TV ("adOn_<key>") */
 void sb_addon_key(const cJSON *addon, char *out, size_t cap);  /* its manifest id, or its URL */
+void sb_row_key(const cJSON *addon, const cJSON *cat, char *out, size_t cap); /* a Home row's switch: its store key */
+int  sb_row_on(const cJSON *addon, const cJSON *cat);         /* 0: the row is hidden (the addon itself stays on) */
+int  sb_row_listable(const cJSON *cat);                       /* a catalogue that can be a Home row */
 
 /* ---- catalogs ---- */
 int  sb_home_defs(CatalogDef *out, int max);

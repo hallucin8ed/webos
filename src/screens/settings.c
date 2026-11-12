@@ -63,9 +63,9 @@ static const Opt PC_EXT[] = { { "0", "Off" }, { "30", "+30 minutes" }, { "60", "
 static const Opt PC_TO[] = { { "05:00", "05:00" }, { "05:30", "05:30" }, { "06:00", "06:00" }, { "06:30", "06:30" }, { "07:00", "07:00" }, { "07:30", "07:30" }, { "08:00", "08:00" }, { "08:30", "08:30" }, { "09:00", "09:00" } };
 static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" }, { "5", "5 min" }, { "10", "10 min" } };
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
-#define NCAT 10
+#define NCAT 11
 #define MAXROWS 48
-static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[8];
+static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[8], rowS[46];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -98,6 +98,19 @@ static struct {
 } S;
 static void set_s(Setting *s, const char *k, const char *lb, const char *ds, const Opt *o, int n, const char *d) { memset(s, 0, sizeof *s); snprintf(s->k, sizeof s->k, "%s", k); snprintf(s->lb, sizeof s->lb, "%s", lb); snprintf(s->ds, sizeof s->ds, "%s", ds ? ds : ""); s->opts = o; s->nopts = n; s->d = d; }
 static void set_act(Setting *s, const char *k, const char *lb, const char *ds) { set_s(s, k, lb, ds, NULL, 0, ""); s->action = 1; }
+/* a switch per Home row: each catalogue of the addons that are on, hidden or shown on Home and Discover. Hiding a row
+   leaves its addon on (its streams, its details) */
+static int row_opts(void) {
+  int n = 0; cJSON *l = sb_addons(); const cJSON *a;
+  if (l) cJSON_ArrayForEach(a, l) { if (!sb_addon_on(a)) continue; const cJSON *m = js_obj(a, "manifest"), *cs = js_arr(m, "catalogs"), *c; const char *an = js_str(m, "name", "");
+    if (cs) cJSON_ArrayForEach(c, cs) { if (n >= 46) break; if (!sb_row_listable(c)) continue;
+      char key[32], lb[96]; sb_row_key(a, c, key, sizeof key); const char *nm = js_str(c, "name", ""), *ty = js_str(c, "type", "");
+      snprintf(lb, sizeof lb, "%s \xc2\xb7 %s", *nm ? nm : an, !strcmp(ty, "movie") ? T("Movies") : !strcmp(ty, "series") ? T("Series") : ty);
+      Setting *s = &rowS[n++]; set_s(s, key, lb, an, OO, 2, "true"); s->raw = 1; } }
+  if (!n) { set_s(&rowS[0], "__norows", "No rows to choose", "None of your addons has a catalogue that can be a row", NULL, 0, ""); rowS[0].info = 1; n = 1; }
+  return n;
+}
+static void rows_refresh(void) { for (int i = 0; i < ncat; i++) if (cats[i].opts == rowS) { cats[i].n = row_opts(); if (S.cat == i && S.idx >= cats[i].n) S.idx = cats[i].n - 1; } S.dirty = 1; }
 /* a switch per addon: on or off on this TV only */
 static int addon_opts(void) {
   int n = 0; cJSON *l = sb_addons(); const cJSON *a;
@@ -204,7 +217,7 @@ static void build(void) {
   set_s(&pcS[5], "pcBedTo", "Bedtime ends", "The rules are read when the profile screen is shown: switch profile to apply a change", PC_TO, 9, "07:00");
   set_s(&pcS[6], "pcBedExt", "Tonight: later bedtime", "Pushes tonight\xe2\x80\x99s bedtime back. It goes back to normal when bedtime ends tomorrow morning", PC_EXT, 5, "0");
   set_s(&pcS[7], "pcPinAt", "PIN asked for", "Opening the Adult profile, or only these parental controls (then anyone can open the Adult profile)", PC_PINAT, 2, "profile");
-  int nl = lang_opts(), nk = keys_opts(), na = addon_opts();
+  int nl = lang_opts(), nk = keys_opts(), na = addon_opts(), nr = row_opts();
   set_act(&acctS[0], "__logout", "Log out", S.acct); acctS[0].raw = 1;
   int nab = about_opts();
   /* grouped by task: what you watch, what the screens look like, account and system; Log out on its own, last */
@@ -215,6 +228,7 @@ static void build(void) {
     { "Screens", "Appearance", "set_look", "Accent colour", "look", lookS, 2, 0 },
     { "Screens", "Language", "set_lang", "The language of the app", NULL, langS, nl, 0 },
     { "Account and system", "Addons", "set_addon", "", NULL, addonS, na, 0 },
+    { "Account and system", "Home rows", "set_addon", "Choose the rows on Home and Discover. Hiding one keeps its addon\xe2\x80\x99s links", NULL, rowS, nr, 0 },
     { "Account and system", "Keys", "set_keys", "Titles in your language, ratings and reviews", "keys", keyS, nk, 0 },
     { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 8, 0 },
     { "Account and system", "About", "info", "Version, updates, logs and support", "about", supS, nab, 0 },
@@ -245,7 +259,7 @@ static void enter(const void *p) { (void)p;
   S.enterAt = app_now(); S.keysAt = -10; S.keysZone = 0;
 }
 static void logout(void) { toast(T("Signing out…"), 1500, NULL); sb_logout(); board_invalidate(); app_go(SCR_LOGIN, NULL, 1); }
-static void on_sync_addons(int changed, void *ud) { (void)ud; toast(T(changed ? "Addons updated" : "Addons up to date"), 2000, NULL); if (changed) board_invalidate(); cats[5].n = addon_opts(); if (S.cat == 5 && S.idx >= cats[5].n) S.idx = cats[5].n - 1; S.dirty = 1; }
+static void on_sync_addons(int changed, void *ud) { (void)ud; toast(T(changed ? "Addons updated" : "Addons up to date"), 2000, NULL); if (changed) board_invalidate(); cats[5].n = addon_opts(); if (S.cat == 5 && S.idx >= cats[5].n) S.idx = cats[5].n - 1; rows_refresh(); S.dirty = 1; }
 static void on_sync_lib(int changed, void *ud) { (void)ud; if (changed) board_invalidate(); }
 static void sync_now(void) { toast(T("Syncing…"), 1500, NULL); sb_pull_library(on_sync_lib, NULL); sb_sync_addons(on_sync_addons, NULL); }
 /* the best stream: switched on only once the line is measured (once, kept); the row says why meanwhile */
@@ -281,7 +295,8 @@ static void set_val(Setting *o, const char *v, int dir) {
       int c = S.cat, i = S.idx, z = S.zone; enter(NULL); S.cat = c; S.idx = i; S.zone = z == 2 ? 1 : z; show_cat(c, 0); S.enterAt = app_now() - 10; } return; } /* the same place, in the new language */
   store_set(o->k, v); S.dirty = 1;
   if (!strcmp(o->k, "bgTrailer")) play_layout(); /* its volume row comes and goes with it, right under it */
-  if (!strncmp(o->k, "adOn_", 5)) { board_invalidate(); cats[5].n = addon_opts(); return; } /* an addon on/off here: rows, metadata and streams follow */
+  if (!strncmp(o->k, "row_", 4)) { board_invalidate(); return; } /* a Home row hidden or shown: Home and Discover are built again */
+  if (!strncmp(o->k, "adOn_", 5)) { board_invalidate(); cats[5].n = addon_opts(); rows_refresh(); return; } /* an addon on/off here: rows, metadata and streams follow */
   if (!strcmp(o->k, "bingeWatch")) store_set("enableNextVideo", v);
   if (!strcmp(o->k, "pcBedExt")) kidctl_extend_tonight(atoi(v));
   if (!strcmp(o->k, "accent")) accent_apply();

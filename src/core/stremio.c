@@ -86,6 +86,15 @@ cJSON *sb_addons(void) { cJSON *a = store_node("addons"); return cJSON_IsArray(a
 /* an addon can be switched off on this TV only (Settings > Addons): a local choice, never synced back to the
    account. Off, it gives no rows, metadata or streams here */
 void sb_addon_key(const cJSON *a, char *out, size_t cap) { const char *id = js_str(js_obj(a, "manifest"), "id", NULL); copy_str(out, cap, id && *id ? id : js_str(a, "transportUrl", "")); }
+/* a Home row (one catalogue of one addon) on or off, on this TV, for this profile: hides the row only, the addon's
+   streams and the rest of it go on as before. Keyed by a short hash of addon, type and catalogue id */
+void sb_row_key(const cJSON *a, const cJSON *cat, char *out, size_t cap) {
+  char ak[300]; sb_addon_key(a, ak, sizeof ak); const char *parts[3] = { ak, js_str(cat, "type", ""), js_str(cat, "id", "") };
+  unsigned h = 2166136261u; for (int p = 0; p < 3; p++) { for (const unsigned char *c = (const unsigned char *)parts[p]; *c; c++) { h ^= *c; h *= 16777619u; } h ^= '|'; h *= 16777619u; }
+  snprintf(out, cap, "row_%08x", h);
+}
+int sb_row_on(const cJSON *a, const cJSON *cat) { char k[32]; sb_row_key(a, cat, k, sizeof k); return strcmp(store_get(k, "true"), "false") != 0; }
+int sb_row_listable(const cJSON *cat) { const char *t = js_str(cat, "type", NULL), *id = js_str(cat, "id", NULL); char ex[200]; return t && id && *t && *id && addon_cat_default_extra(cat, ex, sizeof ex) == 0; }
 int sb_addon_on(const cJSON *a) { char k[300], sk[320]; sb_addon_key(a, k, sizeof k); snprintf(sk, sizeof sk, "adOn_%s", k); return strcmp(store_get(sk, "true"), "false") != 0; }
 typedef struct { void (*cb)(int, void *); void *ud; } ChBox;
 static void on_addons(int st, const unsigned char *b, size_t n, void *ud) {
@@ -120,7 +129,7 @@ static int board_defs(CatalogDef *out, int max, int from) {
     if (profile_is_kids() && (strncmp(base, CINEMETA, strlen(CINEMETA)) != 0) != (pass == 0)) { ai++; continue; }
     if (cats) cJSON_ArrayForEach(cat, cats) {
       const char *ctype = js_str(cat, "type", NULL), *cid = js_str(cat, "id", NULL); char ex[200];
-      if (ctype && cid && *ctype && *cid && addon_cat_default_extra(cat, ex, sizeof ex) == 0 && seen++ >= from && n < max) {
+      if (ctype && cid && *ctype && *cid && addon_cat_default_extra(cat, ex, sizeof ex) == 0 && sb_row_on(ad, cat) && seen++ >= from && n < max) {
         CatalogDef *d = &out[n++]; const char *nm = js_str(cat, "name", ""); char title[96], key[48], path[512], te[96], ie[300];
         snprintf(title, sizeof title, "%s%s%s", nm, *nm ? " · " : "", type_label(ctype)); snprintf(key, sizeof key, "a%d_%d", ai, ci);
         addon_urlenc(ctype, te, sizeof te); addon_urlenc(cid, ie, sizeof ie); snprintf(path, sizeof path, "%s/catalog/%s/%s", base, te, ie);
