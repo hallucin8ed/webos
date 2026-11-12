@@ -1,9 +1,11 @@
 #include "core/profile.h"
+#include "core/store.h"
 #include "cJSON.h"
 #include "sbcrypto.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <SDL2/SDL.h>
 
@@ -53,6 +55,10 @@ void profile_life(int l) {
   if (l < 0) { if (!awayAt) awayAt = SDL_GetTicks() | 1; }
   else if (l > 0) { Uint32 a = awayAt; awayAt = 0; if (a && !kids && profile_has_pin() && SDL_GetTicks() - a >= 30000) relock = 1; }
 }
-int profile_relock_due(void) { if (!relock) return 0; relock = 0; return 1; }
+int profile_relock_due(void) { if (!relock) return 0; relock = 0; return !profile_pin_at_settings(); } /* (no PIN at the Adult profile: nothing to lock again) */
+int profile_pin_at_settings(void) { return !kids && !strcmp(store_get("pcPinAt", "profile"), "settings"); }
+static time_t pcOpenUntil;
+void profile_pc_unlock(void) { pcOpenUntil = time(NULL) + 600; }
+int profile_pc_unlocked(void) { return time(NULL) < pcOpenUntil; }
 void profile_ask(int what) { asked = what; }
 int profile_asked(void) { int a = asked; asked = 0; return a; }

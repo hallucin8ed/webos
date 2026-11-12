@@ -28,6 +28,7 @@
 #include "ui/qrcard.h"
 #include "core/update.h"
 #include "core/profile.h"
+#include "core/kidctl.h"
 #include "screens/logcard.h"
 #include "screens/welcome.h"
 #include "ui/qr.h"
@@ -36,6 +37,7 @@
 #define LOOK_H 300.0f
 #define KEYS_H 446.0f
 static int wnBtn; /* About: What's new, beside the update pill, has the focus (Up from the first row) */
+static int pcWant; /* waiting for the PIN to open the Parental controls */
 static Tween supK; static int supWant; /* the support row: which code shows (0 the coffee, 1 GitHub); OK turns it over */
 #include "ui/img.h"
 #include "core/usb.h"
@@ -56,12 +58,14 @@ static const Opt BGS[] = { { "0", "None" }, { "1", "Solid" }, { ".6", "Transpare
 static const Opt ASSO[] = { { "styled", "Styled" }, { "plain", "Plain" } };
 static const Opt PC_AGE[] = { { "0", "Only titles I allow" }, { "5", "Age 5" }, { "6", "Age 6" }, { "7", "Age 7" }, { "8", "Age 8" }, { "9", "Age 9" }, { "10", "Age 10" }, { "11", "Age 11" }, { "12", "Age 12" }, { "13", "Age 13" }, { "14", "Age 14" }, { "15", "Age 15" }, { "16", "Age 16" } };
 static const Opt PC_FROM[] = { { "18:00", "18:00" }, { "18:30", "18:30" }, { "19:00", "19:00" }, { "19:30", "19:30" }, { "20:00", "20:00" }, { "20:30", "20:30" }, { "21:00", "21:00" }, { "21:30", "21:30" }, { "22:00", "22:00" }, { "23:00", "23:00" } };
+static const Opt PC_PINAT[] = { { "profile", "Opening the Adult profile" }, { "settings", "Parental controls only" } };
+static const Opt PC_EXT[] = { { "0", "Off" }, { "30", "+30 minutes" }, { "60", "+1 hour" }, { "90", "+1\xc2\xbd hours" }, { "120", "+2 hours" } };
 static const Opt PC_TO[] = { { "05:00", "05:00" }, { "05:30", "05:30" }, { "06:00", "06:00" }, { "06:30", "06:30" }, { "07:00", "07:00" }, { "07:30", "07:30" }, { "08:00", "08:00" }, { "08:30", "08:30" }, { "09:00", "09:00" } };
 static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" }, { "5", "5 min" }, { "10", "10 min" } };
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
 #define NCAT 10
 #define MAXROWS 48
-static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[6];
+static Setting playBase[8], playS[8], subsS[6], audS[5], lookS[2], langS[2], keyS[4], addonS[40], acctS[1], supS[8], pcS[8];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -198,6 +202,8 @@ static void build(void) {
   set_s(&pcS[3], "pcBed", "Kids: bedtime lock", "The Kids profile closes and will not open between the two times", OO, 2, "false");
   set_s(&pcS[4], "pcBedFrom", "Bedtime starts", "", PC_FROM, 10, "19:30");
   set_s(&pcS[5], "pcBedTo", "Bedtime ends", "The rules are read when the profile screen is shown: switch profile to apply a change", PC_TO, 9, "07:00");
+  set_s(&pcS[6], "pcBedExt", "Tonight: later bedtime", "Pushes tonight\xe2\x80\x99s bedtime back. It goes back to normal when bedtime ends tomorrow morning", PC_EXT, 5, "0");
+  set_s(&pcS[7], "pcPinAt", "PIN asked for", "Opening the Adult profile, or only these parental controls (then anyone can open the Adult profile)", PC_PINAT, 2, "profile");
   int nl = lang_opts(), nk = keys_opts(), na = addon_opts();
   set_act(&acctS[0], "__logout", "Log out", S.acct); acctS[0].raw = 1;
   int nab = about_opts();
@@ -210,7 +216,7 @@ static void build(void) {
     { "Screens", "Language", "set_lang", "The language of the app", NULL, langS, nl, 0 },
     { "Account and system", "Addons", "set_addon", "", NULL, addonS, na, 0 },
     { "Account and system", "Keys", "set_keys", "Titles in your language, ratings and reviews", "keys", keyS, nk, 0 },
-    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 6, 0 },
+    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 8, 0 },
     { "Account and system", "About", "info", "Version, updates, logs and support", "about", supS, nab, 0 },
     { "", "Log out", "set_out", "", NULL, acctS, 1, 1 } };
   ncat = 0; for (int i = 0; i < NCAT; i++) if ((c[i].opts != keyS || nk) && (c[i].opts != pcS || !profile_is_kids())) cats[ncat++] = c[i];
@@ -277,6 +283,7 @@ static void set_val(Setting *o, const char *v, int dir) {
   if (!strcmp(o->k, "bgTrailer")) play_layout(); /* its volume row comes and goes with it, right under it */
   if (!strncmp(o->k, "adOn_", 5)) { board_invalidate(); cats[5].n = addon_opts(); return; } /* an addon on/off here: rows, metadata and streams follow */
   if (!strcmp(o->k, "bingeWatch")) store_set("enableNextVideo", v);
+  if (!strcmp(o->k, "pcBedExt")) kidctl_extend_tonight(atoi(v));
   if (!strcmp(o->k, "accent")) accent_apply();
   /* only the row changes: a value slides in from the side pressed */
   if (S.idx < MAXROWS && !is_switch(o)) { RowA *r = &S.ra[S.idx]; r->vAt = app_now(); r->vDir = dir; }
@@ -377,6 +384,7 @@ static int key(int k) {
     if (k == K_DOWN) { if (c < ncat - 1) S.cat++; else nudge_start(&S.nudge, k); }
     else if (k == K_LEFT) nudge_start(&S.nudge, k);
     else if (k == K_UP) { if (c > 0) S.cat--; else { topnav_focus(); return 1; } }
+    else if ((k == K_RIGHT || k == K_OK) && cats[S.cat].opts == pcS && profile_pin_at_settings() && !profile_pc_unlocked()) { pcWant = 1; profile_ask(PROFILE_ASK_UNLOCK); return 1; } /* the PIN first (asked between two frames) */
     else if (k == K_RIGHT || k == K_OK) { S.zone = 1; S.idx = 0; }
     else if (k == K_BACK) return 0;
     if (S.cat != c && !cats[S.cat].out) { S.idx = 0; show_cat(S.cat, S.cat > c ? 1 : -1); } /* on Log out the last settings stay, dimmed */
@@ -416,6 +424,7 @@ static int key(int k) {
 }
 static void tick(float dt) {
   ab_tick();
+  if (pcWant && profile_pc_unlocked()) { pcWant = 0; if (cats[S.cat].opts == pcS && S.zone == 0) { S.zone = 1; S.idx = 0; } } /* the PIN was given: in */
   if (usb_serial() != usbSeen) { usb_row(); play_layout(); S.dirty = 1; } /* a drive came or went, or its switch moved */
   if (update_serial() != aboutSeen) { for (int i = 0; i < ncat; i++) if (cats[i].opts == supS) { cats[i].n = about_opts(); if (S.cat == i && S.idx >= cats[i].n) S.idx = cats[i].n - 1; } S.dirty = 1; } /* the update moved on: its rows follow */
   if (S.dirty) layout();

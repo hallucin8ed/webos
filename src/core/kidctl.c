@@ -28,7 +28,7 @@ static void base_id(const char *id, char out[28]) { size_t n = 0; while (id && i
 
 static Tab marks, listed, ages;   /* marks: 1 allowed, 2 blocked; ages: -1 no rating, 0.. the age, -3 asked */
 static char baseDir[1024];
-static int maxAge = 10, listsOn = 1, torrents, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60;
+static int maxAge = 10, listsOn = 1, torrents, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60, bedExt; static time_t bedExtUntil;
 static int hhmm(const char *s, int def) { int h, m; return s && sscanf(s, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60 ? h * 60 + m : def; }
 
 /* ---- ages on disk: "id age", appended as they are learnt ---- */
@@ -45,6 +45,8 @@ void kidctl_capture(const char *dir) {
   snprintf(baseDir, sizeof baseDir, "%s", dir);
   maxAge = atoi(store_get("pcAge", "10")); listsOn = strcmp(store_get("pcLists", "true"), "false") != 0; torrents = !strcmp(store_get("pcTorrents", "false"), "true");
   bedOn = !strcmp(store_get("pcBed", "false"), "true"); bedFrom = hhmm(store_get("pcBedFrom", "19:30"), 19 * 60 + 30); bedTo = hhmm(store_get("pcBedTo", "07:00"), 7 * 60);
+  bedExt = atoi(store_get("pcBedExt", "0")); bedExtUntil = (time_t)atol(store_get("pcBedExtUntil", "0"));
+  if (bedExt && time(NULL) >= bedExtUntil) { bedExt = 0; store_set("pcBedExt", "0"); store_set("pcBedExtUntil", "0"); } /* last night's later bedtime is over */
   const cJSON *x; char b[28];
   cJSON_ArrayForEach(x, store_node("pcAllow")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_ALLOWED; }
   cJSON_ArrayForEach(x, store_node("pcBlock")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_BLOCKED; }
@@ -56,7 +58,8 @@ int kidctl_no_torrents(void) { return profile_is_kids() && !torrents; }
 int kidctl_bedtime(char *until, size_t cap) {
   if (!bedOn || bedFrom == bedTo) return 0;
   time_t t = time(NULL); struct tm lt; localtime_r(&t, &lt); int m = lt.tm_hour * 60 + lt.tm_min;
-  int in = bedFrom < bedTo ? (m >= bedFrom && m < bedTo) : (m >= bedFrom || m < bedTo);
+  int from = bedExt && t < bedExtUntil ? (bedFrom + bedExt) % 1440 : bedFrom; /* tonight's later bedtime */
+  int in = from < bedTo ? (m >= from && m < bedTo) : (m >= from || m < bedTo);
   if (in && until) snprintf(until, cap, "%02d:%02d", bedTo / 60, bedTo % 60);
   return in;
 }
@@ -142,3 +145,13 @@ void kidctl_tick(void) {
 }
 
 unsigned kidctl_gen(void) { return gen_; } /* counts the times new ratings arrived: Search asks again then */
+
+/* Parental controls > Tonight: later bedtime. Kept till the next time bedtime ends (tomorrow morning), then back to
+   normal. Written to the Adult profile's settings, where the rules are read from */
+void kidctl_extend_tonight(int minutes) {
+  char b[24]; time_t now = time(NULL), until = 0;
+  if (minutes > 0) { int to = hhmm(store_get("pcBedTo", "07:00"), 7 * 60); struct tm lt; localtime_r(&now, &lt);
+    lt.tm_hour = to / 60; lt.tm_min = to % 60; lt.tm_sec = 0; until = mktime(&lt); if (until <= now) { lt.tm_mday += 1; until = mktime(&lt); } }
+  snprintf(b, sizeof b, "%ld", (long)until); store_set("pcBedExtUntil", b);
+  fprintf(stderr, "[kids] bedtime tonight: %d min later\n", minutes);
+}

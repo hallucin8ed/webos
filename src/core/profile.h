@@ -18,7 +18,12 @@ const char *profile_dir(void);             /* the chosen profile's data folder (
 void profile_life(int l);
 int  profile_relock_due(void);             /* 1 once, on the frame loop's side */
 /* asked from Settings, done by the frame loop between two frames */
-enum { PROFILE_ASK_NONE = 0, PROFILE_ASK_PIN, PROFILE_ASK_SWITCH };
+enum { PROFILE_ASK_NONE = 0, PROFILE_ASK_PIN, PROFILE_ASK_SWITCH, PROFILE_ASK_UNLOCK };
 void profile_ask(int what);
 int  profile_asked(void);                  /* what was asked, once */
+/* where the PIN is asked (Parental controls > "PIN asked for", kept in the Adult profile's settings): 0 when opening
+   the Adult profile (as it always was), 1 only for the Parental controls, with the Adult profile open to anyone */
+int  profile_pin_at_settings(void);
+void profile_pc_unlock(void);              /* the PIN was given for the Parental controls: open for 10 minutes */
+int  profile_pc_unlocked(void);
 #endif

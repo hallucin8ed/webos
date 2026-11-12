@@ -11,6 +11,7 @@
 #include <string.h>
 
 enum { M_PICK, M_UNLOCK, M_CREATE, M_CONFIRM, M_OLD };
+static int gVerify; /* the PIN asked for the Parental controls (Back goes back to Settings) */
 static struct { char bed[8]; Uint32 bedAt; int mode, pick, pad, n, wrong, fresh; char pin[5], first[5]; const char *msg; Uint32 lockUntil, msgAt; } G;
 
 /* the pad: 1 2 3 / 4 5 6 / 7 8 9 / delete 0 */
@@ -52,14 +53,14 @@ static void draw(void) {
   if (G.mode == M_PICK) {
     text_draw(T("Who\xe2\x80\x99s watching?"), cx, 170, 64, 700, WHITE_A(255), -0.5f, 0, ALIGN_CENTER);
     float s = 330, gap = 110, x0 = cx - s - gap / 2, y = 360;
-    draw_tile(x0, y, s, "A", T("Adult"), T("PIN needed"), G.pick == 0, RGB(74, 62, 140));
+    draw_tile(x0, y, s, "A", T("Adult"), profile_pin_at_settings() ? NULL : T("PIN needed"), G.pick == 0, RGB(74, 62, 140));
     draw_tile(x0 + s + gap, y, s, "K", T("Kids"), NULL, G.pick == 1, RGB(36, 122, 88));
     if (G.bedAt && SDL_GetTicks() - G.bedAt < 6000) text_draw(T1("It\xe2\x80\x99s bedtime. Kids opens again at {t}", "t", G.bed), cx, 880, 30, 600, RGB(255, 200, 120), 0, 0, ALIGN_CENTER);
     text_draw(T("Left / Right to choose, OK to open. Back closes the app"), cx, 960, 24, 400, WHITE_A(120), 0, 0, ALIGN_CENTER);
     return;
   }
   const char *title = G.mode == M_UNLOCK ? T("Enter the PIN") : G.mode == M_OLD ? T("Enter the current PIN") : G.mode == M_CREATE ? T("Choose a parental PIN") : T("Enter it again");
-  const char *sub = G.mode == M_CREATE ? T("Four digits. It opens the Adult profile and the parental controls") : G.mode == M_UNLOCK ? T("The Adult profile is locked") : "";
+  const char *sub = G.mode == M_CREATE ? T("Four digits. It opens the Adult profile and the parental controls") : G.mode == M_UNLOCK ? (gVerify ? T("To change the parental controls") : T("The Adult profile is locked")) : "";
   text_draw(title, cx, 110, 56, 700, WHITE_A(255), -0.5f, 0, ALIGN_CENTER);
   if (sub[0]) text_draw(sub, cx, 110 + text_line_height(56) + 6, 26, 400, WHITE_A(150), 0, 0, ALIGN_CENTER);
   { float d = 30, g = 34, w = 4 * d + 3 * g, x = cx - w / 2, y = 290; /* the four places */
@@ -100,7 +101,7 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
       if (G.mode == M_PICK) {
         if (k == K_LEFT) G.pick = 0; else if (k == K_RIGHT) G.pick = 1;
         else if (k == K_BACK || k == K_EXIT) return -1;
-        else if (k == K_OK) { if (G.pick == 1) { if (kidctl_bedtime(G.bed, sizeof G.bed)) { G.bedAt = SDL_GetTicks() | 1; continue; } return 1; } if (G.fresh) return 0; G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; }
+        else if (k == K_OK) { if (G.pick == 1) { if (kidctl_bedtime(G.bed, sizeof G.bed)) { G.bedAt = SDL_GetTicks() | 1; continue; } return 1; } if (G.fresh || profile_pin_at_settings()) return 0; G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; }
         continue;
       }
       int done = 0;
@@ -110,6 +111,7 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
       else if (k == K_BACK || k == K_EXIT) {
         if (G.n) pin_clear();
         else if (G.mode == M_CONFIRM) { G.mode = M_CREATE; G.msg = NULL; }
+        else if (gVerify) return -2;
         else if (G.mode == M_UNLOCK && pickFirst) { G.mode = M_PICK; G.msg = NULL; }
         else if (startMode == M_OLD) return -2;
         else if (G.mode == M_UNLOCK || k == K_EXIT) return -1;
@@ -131,3 +133,4 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
 int gate_start(SDL_Window *win) { return run(win, profile_has_pin() ? M_PICK : M_CREATE, 1); }
 int gate_relock(SDL_Window *win) { int r = run(win, M_UNLOCK, 0); return r == 0 ? 1 : -1; }
 void gate_change_pin(SDL_Window *win) { run(win, M_OLD, 0); }
+int gate_verify(SDL_Window *win) { gVerify = 1; int r = run(win, M_UNLOCK, 0); gVerify = 0; return r == 0; }

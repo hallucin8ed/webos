@@ -289,6 +289,7 @@ int main(int argc, char **argv) {
     /* the Adult profile, back after a while away: its PIN again; a PIN change asked in Settings */
     if (profile_relock_due()) { if (gate_relock(win) < 0) { fprintf(stderr, "[exit] closed at the PIN\n"); app_quit(); } last = SDL_GetTicks(); }
     { int ask = profile_asked(); if (ask == PROFILE_ASK_PIN) { gate_change_pin(win); last = SDL_GetTicks(); }
+      else if (ask == PROFILE_ASK_UNLOCK) { if (gate_verify(win)) profile_pc_unlock(); last = SDL_GetTicks(); }
       else if (ask == PROFILE_ASK_SWITCH) { fprintf(stderr, "[profile] back to the profile screen\n"); again = 1; app_quit(); } }
     { static Uint32 bedAt; if (profile_is_kids() && SDL_GetTicks() - bedAt > 20000) { bedAt = SDL_GetTicks(); if (kidctl_bedtime(NULL, 0)) { fprintf(stderr, "[kids] bedtime\n"); again = 1; app_quit(); } } }
     kidctl_tick();

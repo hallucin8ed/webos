@@ -15,6 +15,7 @@ int  kidctl_lists_on(void);
 int  kidctl_no_torrents(void);            /* Kids: torrent streams are left out */
 int  kidctl_bedtime(char *until, size_t cap); /* 1: it is bedtime now (until: "07:00") */
 void kidctl_tick(void);                      /* once a frame: the rating lookups */
+void kidctl_extend_tonight(int minutes);     /* Settings: tonight's bedtime this much later (0: as usual) */
 unsigned kidctl_gen(void);                   /* changes whenever new ratings have arrived */
 /* the Adult profile: a title's mark */
 enum { KID_RULE = 0, KID_ALLOWED = 1, KID_BLOCKED = 2 };
