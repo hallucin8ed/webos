@@ -53,6 +53,7 @@ static void ss_hold_update(void) {
   int hold = 0;
   if (player_open() && !player_paused()) hold = 1;                 /* a film is playing: hold, however long it runs */
   else if (SS.on) { double mins = atof(store_get("ssHandoff", "15")); if (mins > 0 && (now - SS.startAt) / 60.0 < mins) hold = 1; }
+  else if (player_open() && atof(store_get("ssDelay", "5")) > 0) hold = 1; /* a paused film, our poster screensaver not up yet: hold, or the TV's own comes first */
   char path[256]; snprintf(path, sizeof path, "/tmp/%s-ss-hold", SB_APP_ID);
   FILE *f = fopen(path, "w"); if (f) { fprintf(f, "%d %ld\n", hold, (long)time(NULL)); fclose(f); }
 }

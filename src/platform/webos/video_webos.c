@@ -124,6 +124,14 @@ static void video_data_json(char *vd, size_t n, const char *mid) {
     mid, bits > 0 ? bits : 8000000L, rate, hdr, h, w, strstr(scan, "inter") ? "VIDEO_INTERLACED" : "VIDEO_PROGRESSIVE");
 }
 static void sleep_ms(int ms) { struct timespec t = { ms / 1000, (long)(ms % 1000) * 1000000L }; nanosleep(&t, NULL); }
+/* The film fills the screen as far as its shape allows: the whole width, centred top to bottom (letterboxed), or the
+   whole height, centred left to right (pillarboxed). The TV is told it is full screen then, which is what keeps LG's
+   own screensaver away; an exactly 16:9 picture is only one case of it. A box at the top (Home's trailer) is not. */
+static int full_screen(int x, int y, int w, int h) {
+  if (x == 0 && w == 1920 && h >= 540 && abs(2 * y + h - 1080) <= 2) return 1;
+  if (y == 0 && h == 1080 && w >= 960 && abs(2 * x + w - 1920) <= 2) return 1;
+  return 0;
+}
 static void *bind_plane(void *u) {
   unsigned mine = (unsigned)(uintptr_t)u; char mid[64]; pthread_mutex_lock(&mu); snprintf(mid, sizeof mid, "%s", S.mediaId); pthread_mutex_unlock(&mu); long task = 0;
 #define ALIVE() (session == mine && acb)
@@ -136,8 +144,8 @@ static void *bind_plane(void *u) {
     if (acbAudioData) { char ad[160]; snprintf(ad, sizeof ad, "{\"context\":\"%s\",\"audio\":{\"immersive\":\"none\"}}", mid); fprintf(stderr, "[video] bind audioData=%d\n", acbAudioData(acb, ad, &task)); } }
   sleep_ms(300);
   if (!ALIVE()) return NULL;
-  if (cropSX >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(cropDX, cropDY, cropDW, cropDH); fprintf(stderr, "[video] bind crop=%d\n", acbCustomWindow(acb, cropSX, cropSY, cropSW, cropSH, d.x, d.y, d.w, d.h, cropDX == 0 && cropDY == 0 && cropDW == 1920 && cropDH == 1080, &task)); }
-  else { SDL_Rect d = to_plane(winX, winY, winW, winH); fprintf(stderr, "[video] bind window=%d\n", acbWindow(acb, d.x, d.y, d.w, d.h, winX == 0 && winY == 0 && winW == 1920 && winH == 1080, &task)); }
+  if (cropSX >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(cropDX, cropDY, cropDW, cropDH); fprintf(stderr, "[video] bind crop=%d\n", acbCustomWindow(acb, cropSX, cropSY, cropSW, cropSH, d.x, d.y, d.w, d.h, full_screen(cropDX, cropDY, cropDW, cropDH), &task)); }
+  else { SDL_Rect d = to_plane(winX, winY, winW, winH); fprintf(stderr, "[video] bind window=%d\n", acbWindow(acb, d.x, d.y, d.w, d.h, full_screen(winX, winY, winW, winH), &task)); }
   if (!ALIVE()) return NULL; fprintf(stderr, "[video] bind playing=%d\n", acbState(acb, 1, S.pausedByUs ? 3 : 2, &task));
 #undef ALIVE
   return NULL;
@@ -151,9 +159,9 @@ static void apply_plane(void) { /* the window or the crop, now (after the bind, 
     return;
   }
   if (!acb || !S.mediaId[0]) return;
-  if (cropSX >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(cropDX, cropDY, cropDW, cropDH); int r = acbCustomWindow(acb, cropSX, cropSY, cropSW, cropSH, d.x, d.y, d.w, d.h, cropDX == 0 && cropDY == 0 && cropDW == 1920 && cropDH == 1080, &task);
+  if (cropSX >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(cropDX, cropDY, cropDW, cropDH); int r = acbCustomWindow(acb, cropSX, cropSY, cropSW, cropSH, d.x, d.y, d.w, d.h, full_screen(cropDX, cropDY, cropDW, cropDH), &task);
     fprintf(stderr, "[video] plane crop %d,%d %dx%d -> %d,%d %dx%d: %d\n", cropSX, cropSY, cropSW, cropSH, d.x, d.y, d.w, d.h, r); if (r) return; noCrop = 1; cropSX = -1; }
-  SDL_Rect d = to_plane(winX, winY, winW, winH); int r = acbWindow(acb, d.x, d.y, d.w, d.h, winX == 0 && winY == 0 && winW == 1920 && winH == 1080, &task);
+  SDL_Rect d = to_plane(winX, winY, winW, winH); int r = acbWindow(acb, d.x, d.y, d.w, d.h, full_screen(winX, winY, winW, winH), &task);
   fprintf(stderr, "[video] plane window %d,%d %dx%d: %d\n", d.x, d.y, d.w, d.h, r);
 }
 
