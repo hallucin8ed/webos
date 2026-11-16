@@ -915,15 +915,14 @@ static void check_prompt(void) {
   double d = dur(); if (d <= 0 || P.seekT >= 0) return; double t = video_time(); int want = 0, big = 0;
   if (in_seg(P.intro.has, P.intro.s, P.intro.e, t, 2) && !P.dismissed[1]) want = 1;
   else if (in_seg(P.recap.has, P.recap.s, P.recap.e, t, 2) && !P.dismissed[2]) want = 2;
-  else if (!P.dismissed[3] && (P.next.has || P.sim)) { int credits = P.outro.has ? t >= P.outro.s : (d > 600 && d - t <= 90 && d - t > 2); if (credits) { want = 3; big = 1; } }
+  else if (!P.dismissed[3] && (P.next.has || P.sim)) { int credits = P.outro.has ? t >= P.outro.s : (d > 600 && d - t <= 30 && d - t > 2); /* no credit times known: only the last 30 s */ if (credits) { want = 3; big = 1; } }
   if (want == P.prompt.k) return;
   P.prompt.k = want; P.prompt.big = big; P.prompt.autoN = 0; P.prompt.nbtn = 0;
   if (want == 1 || want == 2) { P.prompt.b[0].id = "skip"; snprintf(P.prompt.b[0].lb, 48, "%s", T(want == 1 ? "Skip intro" : "Skip recap")); P.prompt.b[0].to = want == 1 ? P.intro.e : P.recap.e; P.prompt.b[0].main = 0; P.prompt.nbtn = 1;
-    /* the pill fills up and skips by itself when full (about 6 s, less when the part ends sooner); OK skips now, a pause stops it */
-    if (!paused()) { double e = want == 1 ? P.intro.e : P.recap.e, dd = e - t - 1; P.prompt.autoN = 1; P.prompt.t0 = now_(); P.prompt.adur = dd < 2.5 ? 2.5 : dd > 6 ? 6 : dd; } }
+    /* OK skips; untouched, nothing is skipped and the pill goes when the part ends */ }
   else if (want == 3) { P.prompt.b[0].id = "credits"; snprintf(P.prompt.b[0].lb, 48, "%s", T("Watch credits")); P.prompt.b[0].main = 0; P.prompt.b[1].id = P.next.has ? "next" : "sim"; snprintf(P.prompt.b[1].lb, 48, "%s", T(P.next.has ? "Next episode" : "Something similar")); P.prompt.b[1].main = 1; P.prompt.nbtn = 2;
-    /* credits + autoplay on: "Next episode" fills up and plays by itself unless you pick something */
-    if (P.next.has && strcmp(store_get("bingeWatch", "true"), "false") && strcmp(store_get("enableNextVideo", "true"), "false")) { P.prompt.autoN = 1; P.prompt.t0 = now_(); P.prompt.adur = 10; } }
+    /* OK on "Next episode" goes now; untouched, the episode plays to its very end, and only then does the next one
+       start (with autoplay on, in the ended handler) */ }
   P.prompt.idx = P.prompt.nbtn ? P.prompt.nbtn - 1 : 0;
   if (want && big && P.mode == 0) P.mode = 3; /* the credits card takes the focus */
   if (!want && P.mode == 3) P.mode = 0;
