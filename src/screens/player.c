@@ -880,17 +880,10 @@ static void apply_aspect(void) {
   float fit = fminf(W / vw, H / vh), fill = fmaxf(W / vw, H / vh), k = fit; int wide = fabsf((float)vw / vh - W / H) < 0.03f;
   if (!strcmp(P.aspect, "fill")) k = wide ? fit * 1.12f : fill; else if (!strcmp(P.aspect, "zoom")) k = wide ? fit * 2.39f / (W / H) : fill * 1.15f;
   float fw = roundf(vw * fit), fh = roundf(vh * fit), fx = roundf((W - fw) / 2), fy = roundf((H - fh) / 2);
-  /* Original, for a picture within 3% of 16:9 (720x400, say): it fills the screen, a few source pixels trimmed off
-     two edges, instead of thin bars. Only a picture covering the whole screen counts as full screen to the TV, and
-     only full-screen video keeps LG's own screensaver away. With no crop on this TV, the whole frame stretched by
-     at most 3% does the same. */
-  if (k == fit && wide && (fw != W || fh != H)) {
-    float w = roundf(vw * fill), h = roundf(vh * fill), x = roundf((W - w) / 2), y = roundf((H - h) / 2);
-    int sx = (int)roundf(-x / fill), sy = (int)roundf(-y / fill), sw = vw - 2 * sx, sh = vh - 2 * sy;
-    if (x >= 0) { sx = 0; sw = vw; } if (y >= 0) { sy = 0; sh = vh; }
-    if (!video_set_crop(sx, sy, sw, sh, 0, 0, W, H)) video_set_window(0, 0, W, H);
-    return; }
-  if (k == fit) { video_set_window(fx, fy, fw, fh); return; }
+  /* Original: the TV gets the whole screen and keeps the picture's shape inside it itself (it applies a stream's
+     pixel aspect the same way), adding its own bars. Only a window covering the whole screen counts as full-screen
+     video to the TV, and only full-screen video keeps LG's own screensaver away, whatever the picture's shape. */
+  if (k == fit) { video_set_window(0, 0, W, H); return; }
   float w = roundf(vw * k), h = roundf(vh * k), x = roundf((W - w) / 2), y = roundf((H - h) / 2);
   float dx = fmaxf(0, x), dy = fmaxf(0, y), dw = fminf(W, x + w) - dx, dh = fminf(H, y + h) - dy;
   int sx = (int)roundf((dx - x) / k), sy = (int)roundf((dy - y) / k), sw = (int)roundf(dw / k), sh = (int)roundf(dh / k);
