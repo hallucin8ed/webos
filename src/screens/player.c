@@ -114,7 +114,7 @@ static struct {
   int open, closing, live, failed, started; double openedAt;
   char type[16], id[SB_ID], vid[SB_VID], name[256], logo[512], bg[512], poster[512], sname[600], saddon[96], url[SB_URL_MAX], alt[SB_URL_MAX]; int altTried, p2pRetried; double lastPos; int quiet, adopt, isTrailer, isHls, liveStream, hlsVod; /* liveStream: its HLS playlist has no end (a live broadcast); hlsVod: it has an end (a replay) */
   cJSON *meta; const cJSON *videos; int season, episode; char epTitle[256], year[8], genre[64];
-  struct { int has; char vid[SB_VID], se[32], title[256], thumb[512], ov[600]; } next; int sim; double startAt;
+  struct { int has; char vid[SB_VID], se[32], title[256], thumb[512], ov[600]; } next; char upto[SB_VID]; /* a file of two episodes or more: the last it holds */ int sim; double startAt;
   struct { int has, tried; double at; char id[16], name[160], poster[400], bg[400], part[64]; } coll; /* a film in a collection: the next one */
   int mode; /* 0 video 1 osd 2 tray 3 prompt */ int row; /* 0 btns 1 bar */ int bIdx;
   struct { const char *id; const char *icon; char lb[48]; int big, nx; float x0, x, y, w, lw; Mo dx; } btns[MAXBTN]; int nbtn, nL;
@@ -412,9 +412,49 @@ static void save_progress(int push) { double d = dur(); if (!P.id[0] || P.isTrai
   else lib_set_progress(P.id, &it, P.vid, video_time() * 1000, d * 1000, push);
   if (push) fprintf(stderr, "[lib] place kept: %s at %.0f of %.0f s\n", P.vid, video_time(), d);
   P.lastSave = now_(); }
+/* ---- a file holding several episodes ("S01E01-E02", "S01E01E02", "1x01-02", "S01E01+E02") ---------------------------
+   Its name says the last one it holds: that one (and the ones before it) is what was watched, and the next episode is
+   the one after it, not the second half of the same file again. Off by one and the range tiny (2 to 4 episodes), so
+   "S01E01 720p" or "E01 2160p" never read as one */
+static int num_at(const char *q, int maxd, const char **end) { int n = 0, d = 0; while (*q >= '0' && *q <= '9' && d < maxd + 1) { n = n * 10 + (*q - '0'); q++; d++; } if (!d || d > maxd || (*q >= '0' && *q <= '9')) return -1; *end = q; return n; }
+static int range_end(const char *q, int season, int first) { /* q just after the first episode number */
+  while (*q == ' ' || *q == '.' || *q == '_') q++;
+  int mark = 0; if (*q == '-' || *q == '+' || *q == '&') { mark = 1; q++; while (*q == ' ' || *q == '.' || *q == '_') q++; }
+  if (*q == 's') { const char *e; int s2 = num_at(q + 1, 2, &e); if (s2 != season || *e != 'e') return -1; q = e + 1; mark = 1; }
+  else if (*q == 'e') { q++; mark = 1; }
+  else if (mark) { const char *e; int s2 = num_at(q, 2, &e); if (s2 == season && *e == 'x') q = e + 1; } /* "1x01-1x02" */
+  if (!mark) return -1;
+  const char *e; int last = num_at(q, 3, &e); if (last <= first || last > first + 3) return -1;
+  int more = range_end(e, season, last); return more > 0 && more <= first + 3 ? more : last; } /* "E01E02E03": the third */
+static int multi_last(int season, int ep) {
+  char l[1100]; snprintf(l, sizeof l, "%s %s", P.sname, P.st.filename); for (char *c = l; *c; c++) *c = (char)tolower((unsigned char)*c);
+  for (const char *q = l; *q; q++) { const char *e, *e2; int sn, en, r;
+    if (*q == 's' && (q == l || !isalnum((unsigned char)q[-1])) && (sn = num_at(q + 1, 2, &e)) >= 0) { if (*e == ' ' || *e == '.' || *e == '_' || *e == '-') e++;
+      if (*e == 'e' && (en = num_at(e + 1, 3, &e2)) >= 0 && sn == season && en == ep && (r = range_end(e2, season, en)) > 0) return r; }
+    if (*q >= '0' && *q <= '9' && (q == l || !isalnum((unsigned char)q[-1])) && (sn = num_at(q, 2, &e)) >= 0 && *e == 'x' && (en = num_at(e + 1, 3, &e2)) >= 0 && sn == season && en == ep) {
+      const char *t = e2; while (*t == ' ') t++; if (*t == '-' || *t == '+' || *t == '&') { if ((r = range_end(e2, season, en)) > 0) return r; } } }
+  return 0; }
+static void set_next(const cJSON *nxt) {
+  P.next.has = 1; snprintf(P.next.vid, sizeof P.next.vid, "%s", js_str(nxt, "id", ""));
+  if (js_num(nxt, "season", -1) >= 0) snprintf(P.next.se, 32, "S%d · E%d", (int)js_num(nxt, "season", 0), (int)js_num(nxt, "episode", 0)); else P.next.se[0] = 0;
+  snprintf(P.next.title, 256, "%s", js_str(nxt, "name", js_str(nxt, "title", ""))); snprintf(P.next.thumb, 512, "%s", js_str(nxt, "thumbnail", "")); snprintf(P.next.ov, 600, "%s", js_str(nxt, "overview", js_str(nxt, "description", ""))); }
+/* once the episode list and the stream are both known (either can come first) */
+static void multi_fix(void) {
+  if (P.upto[0] || !P.videos || !P.sname[0] || P.season < 0 || P.episode < 0 || strcmp(P.type, "series")) return;
+  int last = multi_last(P.season, P.episode); if (!last) return;
+  const cJSON *v, *lastV = NULL, *after = NULL, *first = NULL;
+  cJSON_ArrayForEach(v, P.videos) { int s = (int)js_num(v, "season", -1), e = (int)js_num(v, "episode", -1);
+    if (s == P.season && e == last) lastV = v; if (s == P.season && e == last + 1) after = v;
+    if (s == P.season + 1 && (!first || e < (int)js_num(first, "episode", 0))) first = v; }
+  if (!lastV) return; /* (the list doesn't have that episode: left as it was) */
+  snprintf(P.upto, sizeof P.upto, "%s", js_str(lastV, "id", ""));
+  if (!after) after = first;
+  if (after) { const char *rel = js_str(after, "released", ""); struct tm tm; memset(&tm, 0, sizeof tm); if (strlen(rel) >= 10 && sscanf(rel, "%d-%d-%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday) == 3) { tm.tm_year -= 1900; tm.tm_mon--; if (timegm(&tm) > time(NULL)) after = NULL; } }
+  if (after) set_next(after); else { P.next.has = 0; P.next.vid[0] = 0; }
+  fprintf(stderr, "[player] this file holds episodes %d to %d: watched through %s, next %s\n", P.episode, last, P.upto, after ? P.next.vid : "(none)"); }
 static void mark_watched(void) {
   if (P.isTrailer || P.marked || live_title() || getenv("SB_PLAY_NOSAVE")) return; P.marked = 1; Item it = lib_item(); cJSON *l = lib_get(P.id); if (!l) l = lib_new_item(&it);
-  if (episodic() && P.videos && strcmp(P.vid, P.id)) { snprintf(it.videoId, sizeof it.videoId, "%s", P.vid); lib_episode_watched(&it, P.videos); } /* it and the aired ones before it; the show's place on to the next (a special: itself) */
+  if (episodic() && P.videos && strcmp(P.vid, P.id)) { multi_fix(); snprintf(it.videoId, sizeof it.videoId, "%s", P.upto[0] ? P.upto : P.vid); lib_episode_watched(&it, P.videos); } /* it and the aired ones before it; the show's place on to the next (a special: itself) */
   else if (!strcmp(P.type, "series") && P.vid[0] && strcmp(P.vid, P.id)) { snprintf(it.videoId, sizeof it.videoId, "%s", P.vid); lib_episode_watched(&it, NULL); } /* its episode list not here yet: from the cached one (never as a film) */
   else lib_set_movie_watched(l, 1);
   fprintf(stderr, "[lib] watched (%s)\n", P.ended ? "the end" : "the credits");
@@ -1897,6 +1937,7 @@ static void fill_from_meta(void) {
     if (nxt) { const char *rel = js_str(nxt, "released", ""); struct tm tm; memset(&tm, 0, sizeof tm); if (strlen(rel) >= 10 && sscanf(rel, "%d-%d-%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday) == 3) { tm.tm_year -= 1900; tm.tm_mon--; if (timegm(&tm) > time(NULL)) nxt = NULL; } } /* not out yet */
     if (cur) snprintf(P.epTitle, sizeof P.epTitle, "%s", js_str(cur, "name", js_str(cur, "title", "")));
     if (nxt) { P.next.has = 1; snprintf(P.next.vid, 80, "%s", js_str(nxt, "id", "")); if (js_num(nxt, "season", -1) >= 0) snprintf(P.next.se, 32, "S%d · E%d", (int)js_num(nxt, "season", 0), (int)js_num(nxt, "episode", 0)); else if (js_num(nxt, "episode", -1) >= 0) snprintf(P.next.se, 32, "E%d", (int)js_num(nxt, "episode", 0)); else P.next.se[0] = 0; snprintf(P.next.title, 256, "%s", js_str(nxt, "name", js_str(nxt, "title", ""))); snprintf(P.next.thumb, 512, "%s", js_str(nxt, "thumbnail", "")); snprintf(P.next.ov, 600, "%s", js_str(nxt, "overview", js_str(nxt, "description", ""))); }
+    P.upto[0] = 0; multi_fix(); /* (a two-episode file: the next is after its last) */
   } else if (P.type[0] && strcmp(P.type, "other")) P.sim = 1;
 }
 /* the title's metadata: from memory at once, else from the disk cache (that answer can come back before the player
@@ -2074,6 +2115,7 @@ static void play_stream(const Stream *s, const char *vid, double startAt) {
   P.st = *s; snprintf(P.url, sizeof P.url, "%s", s->url); snprintf(P.alt, sizeof P.alt, "%s", nextAlt); nextAlt[0] = 0;
   if ((s->hdrs[0] || s->rhdrs[0]) && !strncmp(s->url, "http", 4)) { hproxy_url(s->url, s->hdrs, s->rhdrs, P.url, sizeof P.url); fprintf(stderr, "[player] the stream wants its own headers: through %s\n", P.url); } /* every request for it carries them */
   char info[700]; sb_stream_info(s, info, sizeof info); snprintf(P.sname, sizeof P.sname, "%s", info); snprintf(P.saddon, sizeof P.saddon, "%s", s->addon);
+  multi_fix(); /* (the episode list already here: the file's name may hold two) */
   if (!P.isTrailer && strcmp(P.type, "other")) sb_remember_stream(P.id, P.vid, s); /* the torrent itself, resolved again next time */
   if (!strncmp(P.url, "ytid:", 5)) { /* a YouTube video: found as the trailers are, behind the title art */
     P.resolving = 1; set_status(""); p2pTok++; P.ytTok = trailer_find(NULL, P.url + 5, 0, on_yt, (void *)(uintptr_t)p2pTok); return; }
