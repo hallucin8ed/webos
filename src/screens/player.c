@@ -596,7 +596,7 @@ static void ass_sync(void) {
   asssubs_set_line(pos_pct() > 8 ? pos_pct() - 8 : 0); /* the Position setting: 8 % (the default) leaves styled lines where the script puts them */
   asssubs_tick(t, rate, vs == VID_PLAYING && !video_settling(), video_fps(), vx, vy, vw, vh, w, h, SUB_SIZES[size_idx()] / 100.0f);
 }
-static const char *skip_mode(void) { return store_get("skipIntro", "auto"); } /* the intro / recap button: auto, show, off */
+static const char *skip_mode(void) { return store_get("skipIntro", "show"); } /* the intro / recap button: auto, show, off */
 static void sync_auto_arm(void);
 /* a language's regional variant, where subtitles name one: Brazilian Portuguese (pob), Latin American Spanish (spl);
    "" for the rest. The language match takes either for the other, so the variant asked for is looked for first */
@@ -1266,7 +1266,10 @@ static void apply_aspect(void) {
   float fit = fminf(W / vw, H / vh), fill = fmaxf(W / vw, H / vh), k = fit; int wide = fabsf((float)vw / vh - W / H) < 0.03f;
   if (!strcmp(P.aspect, "fill")) k = wide ? fit * 1.12f : fill; else if (!strcmp(P.aspect, "zoom")) k = wide ? fit * 2.39f / (W / H) : fill * 1.15f;
   float fw = roundf(vw * fit), fh = roundf(vh * fit), fx = roundf((W - fw) / 2), fy = roundf((H - fh) / 2);
-  if (k == fit) { video_set_window(fx, fy, fw, fh); return; }
+  /* Original: the TV gets the whole screen and keeps the picture's shape inside it itself (it applies a stream's
+     pixel aspect the same way), adding its own bars. Only a window covering the whole screen counts as full-screen
+     video to the TV, and only full-screen video keeps LG's own screensaver away, whatever the picture's shape. */
+  if (k == fit) { video_set_window(0, 0, W, H); return; }
   float w = roundf(vw * k), h = roundf(vh * k), x = roundf((W - w) / 2), y = roundf((H - h) / 2);
   float dx = fmaxf(0, x), dy = fmaxf(0, y), dw = fminf(W, x + w) - dx, dh = fminf(H, y + h) - dy;
   int sx = (int)roundf((dx - x) / k), sy = (int)roundf((dy - y) / k), sw = (int)roundf(dw / k), sh = (int)roundf(dh / k);
@@ -1300,15 +1303,15 @@ static void check_prompt(void) {
   int skipOn = strcmp(skip_mode(), "off") != 0; /* Off: no intro / recap button at all (the next episode's card stays) */
   if (skipOn && in_seg(P.intro.has, P.intro.s, P.intro.e, t, 2) && !P.dismissed[1]) want = 1;
   else if (skipOn && in_seg(P.recap.has, P.recap.s, P.recap.e, t, 2) && !P.dismissed[2]) want = 2;
-  else if (!P.dismissed[3] && (P.next.has || P.coll.has || P.sim)) { int credits = P.outro.has ? t >= P.outro.s : (d > 600 && d - t <= 90 && d - t > 2); if (credits) { want = 3; big = 1; } }
+  else if (!P.dismissed[3] && (P.next.has || P.coll.has || P.sim)) { int credits = P.outro.has ? t >= P.outro.s : (d > 600 && d - t <= 30 && d - t > 2); /* no credit times known: only the last 30 s */ if (credits) { want = 3; big = 1; } }
   if (want == P.prompt.k) return;
   P.prompt.k = want; P.prompt.big = big; P.prompt.autoN = 0; P.prompt.nbtn = 0;
   if (want == 1 || want == 2) { P.prompt.b[0].id = "skip"; snprintf(P.prompt.b[0].lb, 48, "%s", T(want == 1 ? "Skip intro" : "Skip recap")); P.prompt.b[0].to = want == 1 ? P.intro.e : P.recap.e; P.prompt.b[0].main = 0; P.prompt.nbtn = 1;
     /* the pill fills up and skips by itself when full (about 6 s, less when the part ends sooner); OK skips now, a pause stops it */
     if (!paused() && !strcmp(skip_mode(), "auto")) { double e = want == 1 ? P.intro.e : P.recap.e, dd = e - t - 1; P.prompt.autoN = 1; P.prompt.t0 = now_(); P.prompt.adur = dd < 2.5 ? 2.5 : dd > 6 ? 6 : dd; } }
   else if (want == 3) { P.prompt.b[0].id = "credits"; snprintf(P.prompt.b[0].lb, 48, "%s", T("Watch credits")); P.prompt.b[0].main = 0; P.prompt.b[1].id = P.next.has ? "next" : P.coll.has ? "coll" : "sim"; snprintf(P.prompt.b[1].lb, 48, "%s", P.next.has ? T("Next episode") : P.coll.has ? T("Next film") : T("Something similar")); P.prompt.b[1].main = 1; P.prompt.nbtn = 2;
-    /* credits + autoplay on: "Next episode" fills up and plays by itself unless you pick something */
-    if (P.next.has && strcmp(store_get("bingeWatch", "true"), "false") && strcmp(store_get("enableNextVideo", "true"), "false")) { P.prompt.autoN = 1; P.prompt.t0 = now_(); P.prompt.adur = 10; } }
+    /* OK on "Next episode" goes now; untouched, the episode plays to its very end, and only then does the next one
+       start (with autoplay on, in the ended handler) */ }
   P.prompt.idx = P.prompt.nbtn ? P.prompt.nbtn - 1 : 0;
   if (want && big && P.mode == 0) P.mode = 3; /* the credits card takes the focus */
   if (!want && P.mode == 3) P.mode = 0;

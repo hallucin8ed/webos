@@ -151,11 +151,21 @@ static int screensaverHeld(void) { return S.mediaId[0] && !S.ended && !S.error; 
 /* ---- the video plane on webOS 3/4 ---- */
 /* the plain window: once the frame's size is known it goes as a custom window with the whole frame as its source (the
    form a letterboxed film is measured to show in on these sets), before that as a plain one */
+/* The film fills the screen as far as its shape allows: the whole width, centred top to bottom (letterboxed), or the
+   whole height, centred left to right (pillarboxed). The TV is told it is full screen then, which is what keeps LG's
+   own screensaver away; an exactly 16:9 picture is only one case of it. A box at the top (Home's trailer) is not. */
+static int full_screen(int x, int y, int w, int h) {
+  if (x == 0 && w == 1920 && h >= 540 && abs(2 * y + h - 1080) <= 2) return 1;
+  if (y == 0 && h == 1080 && w >= 960 && abs(2 * x + w - 1920) <= 2) return 1;
+  return 0;
+}
 static int acb_window(const PlaneReq *q, long *task, const char **how) {
-  SDL_Rect d = to_plane(q->wx, q->wy, q->ww, q->wh); int full = q->wx == 0 && q->wy == 0 && q->ww == 1920 && q->wh == 1080;
+  SDL_Rect d = to_plane(q->wx, q->wy, q->ww, q->wh); int full = full_screen(q->wx, q->wy, q->ww, q->wh), whole = q->wx == 0 && q->wy == 0 && q->ww == 1920 && q->wh == 1080;
   pthread_mutex_lock(&mu); int fw = S.w, fh = S.h; pthread_mutex_unlock(&mu);
   plane_rule();
-  if (plane_new && fw > 0 && fh > 0 && acbCustomWindow && !noCrop) { *how = "whole frame"; int r = acbCustomWindow(acb, 0, 0, fw, fh, d.x, d.y, d.w, d.h, full, task); if (r) return r;
+  /* the whole screen (Original mode): the plain window, so the TV keeps the picture's shape and adds the bars itself (the
+     whole frame as the source would stretch a 4:3 show to it), and counts it as full-screen video */
+  if (!whole && plane_new && fw > 0 && fh > 0 && acbCustomWindow && !noCrop) { *how = "whole frame"; int r = acbCustomWindow(acb, 0, 0, fw, fh, d.x, d.y, d.w, d.h, full, task); if (r) return r;
     fprintf(stderr, "[video] the whole-frame window was refused: a plain one\n"); }
   *how = "window"; return acbWindow(acb, d.x, d.y, d.w, d.h, full, task);
 }
@@ -185,7 +195,7 @@ static void *bind_plane(void *u) {
   sleep_ms(300);
   if (!ALIVE()) return NULL;
   { PlaneReq q = plane_snap(); pthread_mutex_lock(&acbWinMu);
-    if (q.csx >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(q.cdx, q.cdy, q.cdw, q.cdh); fprintf(stderr, "[video] bind crop=%d\n", acbCustomWindow(acb, q.csx, q.csy, q.csw, q.csh, d.x, d.y, d.w, d.h, q.cdx == 0 && q.cdy == 0 && q.cdw == 1920 && q.cdh == 1080, &task)); }
+    if (q.csx >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(q.cdx, q.cdy, q.cdw, q.cdh); fprintf(stderr, "[video] bind crop=%d\n", acbCustomWindow(acb, q.csx, q.csy, q.csw, q.csh, d.x, d.y, d.w, d.h, full_screen(q.cdx, q.cdy, q.cdw, q.cdh), &task)); }
     else { const char *how; int r = acb_window(&q, &task, &how); fprintf(stderr, "[video] bind %s=%d\n", how, r); }
     pthread_mutex_unlock(&acbWinMu); }
   if (!ALIVE()) return NULL; fprintf(stderr, "[video] bind playing=%d\n", acbState(acb, 1, S.pausedByUs ? 3 : 2, &task));
@@ -220,7 +230,7 @@ static void apply_plane_now(const PlaneReq *q) { /* the window or the crop, now 
     return;
   }
   if (!acb || !S.mediaId[0]) return;
-  if (q->csx >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(q->cdx, q->cdy, q->cdw, q->cdh); int r = acbCustomWindow(acb, q->csx, q->csy, q->csw, q->csh, d.x, d.y, d.w, d.h, q->cdx == 0 && q->cdy == 0 && q->cdw == 1920 && q->cdh == 1080, &task);
+  if (q->csx >= 0 && acbCustomWindow) { SDL_Rect d = to_plane(q->cdx, q->cdy, q->cdw, q->cdh); int r = acbCustomWindow(acb, q->csx, q->csy, q->csw, q->csh, d.x, d.y, d.w, d.h, full_screen(q->cdx, q->cdy, q->cdw, q->cdh), &task);
     fprintf(stderr, "[video] plane crop %d,%d %dx%d -> %d,%d %dx%d: %d\n", q->csx, q->csy, q->csw, q->csh, d.x, d.y, d.w, d.h, r); if (r) return; plane_no_crop(); }
   SDL_Rect d = to_plane(q->wx, q->wy, q->ww, q->wh); const char *how; int r = acb_window(q, &task, &how);
   fprintf(stderr, "[video] plane %s %d,%d %dx%d: %d\n", how, d.x, d.y, d.w, d.h, r);

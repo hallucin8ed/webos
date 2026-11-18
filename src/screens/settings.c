@@ -258,7 +258,7 @@ static void build(void) {
   prev_available(); /* (its library looked at in the background now, so the row is there when Settings opens) */
   set_s(&playBase[10], "seekPreviews", "Previews on the seek bar", "Pictures from the film over the bar as you move through it. Off: none are made", OO, 2, "true"); /* the file's chapters on the seek bar and in the seek pill */
   set_s(&playBase[11], "seekPreviewsWait", "Load previews before playing", "The film starts once this much of it has its previews; OK starts it at once", PWO, 7, "80"); playBase[11].sub = 1;
-  set_s(&playBase[8], "skipIntro", "Skip intro and recap", "Auto skips by itself after a moment; Show waits for OK; Off shows nothing", SKIPO, 3, "auto");
+  set_s(&playBase[8], "skipIntro", "Skip intro and recap", "Auto skips by itself after a moment; Show waits for OK; Off shows nothing", SKIPO, 3, "show"); /* (family: never skipped unless asked) */
   set_s(&playBase[2], "aspectMode", "Picture size", "Original, fill the screen or zoom", ASPECT, 3, "fit");
   set_s(&playBase[3], "bgTrailer", "Background trailers", "A trailer plays behind Home after a few seconds", OO, 2, "true");
   set_s(&playBase[4], "autoBest", "Play the best stream automatically", "", OO, 2, "false");
@@ -683,7 +683,7 @@ static void pv_skip_scene(float x, float y, float w, float h, double t, int live
   gfx_clip_pop(); }
 /* the way chosen changed: the new scene from its start, fading in over the old one (which goes on meanwhile) */
 static void pv_skip(float x, float y, float w, float h, double t, int live) {
-  const char *m = store_get("skipIntro", "auto"); int mode = !strcmp(m, "off") ? 0 : !strcmp(m, "show") ? 2 : 1;
+  const char *m = store_get("skipIntro", "show"); int mode = !strcmp(m, "off") ? 0 : !strcmp(m, "show") ? 2 : 1;
   static int cur = -1, prev = -1; static double curT0, prevT0, at = -10; double now = app_now();
   if (cur < 0) { cur = mode; curT0 = now; } else if (mode != cur) { prev = cur; prevT0 = curT0; cur = mode; curT0 = at = now; }
   float e = pv_ease((now - at) / 0.32);
