@@ -13,6 +13,7 @@ int  kidctl_ok(const char *id);           /* Kids: may this title (or an episode
 void kidctl_listed(const char *id);       /* Kids: seen in a list addon's catalogue */
 int  kidctl_lists_on(void);
 int  kidctl_no_torrents(void);            /* Kids: torrent streams are left out */
+int  kidctl_no_live(void);                /* Kids: no live TV (channels carry no age rating: all or none) */
 int  kidctl_bedtime(char *until, size_t cap); /* 1: it is bedtime now (until: "07:00") */
 void kidctl_tick(void);                      /* once a frame: the rating lookups */
 void kidctl_extend_tonight(int minutes);     /* Settings: tonight's bedtime this much later (0: as usual) */

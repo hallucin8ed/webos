@@ -1,3 +1,4 @@
+#include "core/kidctl.h"
 #include "screens/player.h"
 #include "core/traktwatch.h"
 #include "screens/board.h"
@@ -2402,6 +2403,7 @@ static void coll_next_check(void) {
   const Coll *c = coll_get(key); if (!c) return; P.coll.tried = 1; int ix = coll_index(c, P.id), nx = -1; if (ix < 0) return;
   for (int i = ix + 1; i < c->n; i++) if (!strcmp(c->part[i].type, "movie")) { nx = i; break; } if (nx < 0) return; /* (the next film: a franchise's shows passed over) */
   if (!c->part[nx].id[0]) { P.coll.tried = 0; return; } /* (its IMDb id on its way: asked again in a second) */
+  if (!kidctl_ok(c->part[nx].id)) { P.coll.tried = 0; return; } /* (Kids: offered only once its rating lets it; looked up meanwhile) */
   const CollPart *x = &c->part[nx]; P.coll.has = 1; snprintf(P.coll.id, sizeof P.coll.id, "%s", x->id); snprintf(P.coll.name, sizeof P.coll.name, "%s", x->name); snprintf(P.coll.poster, sizeof P.coll.poster, "%s", x->poster);
   snprintf(P.coll.bg, sizeof P.coll.bg, "https://images.metahub.space/background/medium/%s/img", x->id);
   char a[16], b[16]; snprintf(a, sizeof a, "%d", nx + 1); snprintf(b, sizeof b, "%d", c->n); snprintf(P.coll.part, sizeof P.coll.part, "%s", T2("Part {n} of {m}", "n", a, "m", b));

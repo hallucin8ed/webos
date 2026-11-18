@@ -295,13 +295,13 @@ static ItemList *list_from_metas(const cJSON *metas, const char *type, int max) 
 /* the Kids profile: only the titles its rules let through (a list addon's own catalogue is a list of approved
    titles; a search is never one); more of the answer is read so the rows still fill */
 #define KID_READ(n) (profile_is_kids() && (n) < 100 ? 100 : (n))
-/* live TV and sports lists are never trusted as they are: a channel is shown to Kids only once allowed by hand */
+/* live TV and sports lists: channels have no age rating, so for Kids it is all of them (Parental controls > live TV) or none */
 static int kid_live_type(const char *type) { static const char *const L[] = { "tv", "channel", "events", "event", "sport", "sports", "live" }; for (unsigned i = 0; type && i < sizeof L / sizeof *L; i++) if (!strcmp(type, L[i])) return 1; return 0; }
-static int kid_trusted_t(const char *url, const char *type) { return url && strncmp(url, CINEMETA, strlen(CINEMETA)) && !strstr(url, "search=") && !kid_live_type(type); }
+static int kid_trusted_t(const char *url, const char *type) { if (kid_live_type(type)) return kidctl_no_live() ? 0 : 2; /* 2: every channel (live TV on for Kids) */ return url && strncmp(url, CINEMETA, strlen(CINEMETA)) && !strstr(url, "search=") && !traktrows_is(url); } /* (Trakt's rows: recommendations, not a list someone chose) */
 #define kid_trusted(url) kid_trusted_t((url), r->type)
 static void kid_filter(ItemList *l, int trusted, int max) {
   if (!l) return;
-  if (profile_is_kids()) { int k = 0;
+  if (profile_is_kids() && trusted != 2) { int k = 0;
     for (int i = 0; i < l->n; i++) { if (trusted) kidctl_listed(l->items[i].id); if (kidctl_ok(l->items[i].id)) { if (k != i) l->items[k] = l->items[i]; k++; } }
     l->n = k; }
   if (l->n > max) l->n = max;

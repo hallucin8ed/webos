@@ -87,7 +87,7 @@ static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" 
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
 #define NCAT 13
 #define MAXROWS 48
-static Setting playBase[15], playS[11], seekS[6], subsS[11], audS[4], lookS[6], langS[44], langOpt, keyS[4], traktS[6], addonS[40], acctS[1], supS[12], pcS[8], rowS[46];
+static Setting playBase[15], playS[11], seekS[6], subsS[11], audS[4], lookS[6], langS[44], langOpt, keyS[4], traktS[6], addonS[40], acctS[1], supS[12], pcS[9], rowS[46];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -307,6 +307,7 @@ static void build(void) {
   set_s(&pcS[4], "pcBedFrom", "Bedtime starts", "", PC_FROM, 10, "19:30");
   set_s(&pcS[5], "pcBedTo", "Bedtime ends", "The rules are read when the profile screen is shown: switch profile to apply a change", PC_TO, 9, "07:00");
   set_s(&pcS[6], "pcBedExt", "Tonight: later bedtime", "Pushes tonight\xe2\x80\x99s bedtime back. It goes back to normal when bedtime ends tomorrow morning", PC_EXT, 5, "0");
+  set_s(&pcS[8], "pcLive", "Kids: live TV", "Channels have no age rating: On shows every channel of the Kids account\xe2\x80\x99s live TV addons", OO, 2, "false");
   set_s(&pcS[7], "pcPinAt", "PIN asked for", "Opening the Adult profile, or only these parental controls (then anyone can open the Adult profile)", PC_PINAT, 2, "profile");
   int nl = lang_opts(), nk = keys_opts(), na = addon_opts(), nr = row_opts();
   set_act(&acctS[0], "__logout", "Log out", ""); /* (who it is: the card above it) */
@@ -323,7 +324,7 @@ static void build(void) {
     { "Account and system", "Home rows", "set_addon", "Choose the rows on Home and Discover. Hiding one keeps its addon\xe2\x80\x99s links", NULL, rowS, nr, 0 },
     { "Account and system", "Trakt", "set_trakt", "Track what you watch", "trakt", traktS, 1, 0 },
     { "Account and system", "Keys", "set_keys", "Titles in your language, ratings and reviews", "keys", keyS, nk, 0 },
-    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 8, 0 },
+    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 9, 0 },
     { "Account and system", "About", "info", "Version, updates, logs and support", "about", supS, nab, 0 },
     { "", "Log out", "set_out", "", "acct", acctS, 0, 1 } }; /* (no row of its own: the category itself is the button, the page shows who is signed in) */
   ncat = 0; for (int i = 0; i < NCAT; i++) if ((c[i].opts != keyS || nk) && (c[i].opts != pcS || !profile_is_kids())) cats[ncat++] = c[i];

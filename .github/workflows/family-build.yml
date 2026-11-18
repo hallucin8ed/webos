@@ -2,7 +2,7 @@
 name: Build Stremio Family
 on:
   push:
-    branches: [kids]
+    branches: [kids, family-1.1]
   workflow_dispatch:
 permissions:
   contents: write
@@ -12,8 +12,8 @@ jobs:
     env:
       APPID: tv.stremioorigin.family
       TITLE: Stremio Family
-      UPSTREAM_IPK: https://stremio-origin.github.io/webos/tv.stremioorigin.app_1.0.0_arm.ipk
-      UPSTREAM_SHA: 949d4eabafb7290258eae8ad9e405e7f8f31f4c030071039258f382ca7769a42
+      UPSTREAM_IPK: https://stremio-origin.github.io/webos/tv.stremioorigin.app_1.1.1_arm.ipk
+      UPSTREAM_SHA: 9b5a0b165861af4572fc143f90c21881abb0bdd8385d5ee458f89f784fddb688
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +29,7 @@ jobs:
           SYSROOT="$(dirname "$(dirname "$(dirname "$(find "$HOME/origin-build/sdk" -name libSDL2.so -path '*sysroot/usr/lib/*' | head -1)")")")"
           test -f "$SYSROOT/usr/lib/libSDL2.so"
           echo "SDK=$SYSROOT" >> "$GITHUB_ENV"
-      - name: Torrent and sound libraries, unchanged from the original 1.0.0 release
+      - name: Torrent and sound libraries, unchanged from the original 1.1.1 release
         run: |
           mkdir -p /tmp/up build/webos && cd /tmp/up
           curl -fsSL -o up.ipk "$UPSTREAM_IPK"
@@ -44,9 +44,10 @@ jobs:
         with:
           name: stremio-family-ipk
           path: dist/*.ipk
-      - name: Publish as the family-latest release
+      - name: Publish (kids branch -> family-latest; any other branch -> family-test, the one being tried)
         run: |
-          gh release delete kids-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release delete family-latest --yes --cleanup-tag 2>/dev/null || true
-          gh release create family-latest dist/*.ipk --target "$GITHUB_SHA" --prerelease \
-            --title "Stremio Family (latest build)" --notes "Built automatically from the kids branch at $GITHUB_SHA."
+          if [ "$GITHUB_REF_NAME" = kids ]; then TAG=family-latest; TITLE_R="Stremio Family (latest build)"; else TAG=family-test; TITLE_R="Stremio Family (test build: $GITHUB_REF_NAME)"; fi
+          [ "$TAG" = family-latest ] && gh release delete kids-latest --yes --cleanup-tag 2>/dev/null || true
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" dist/*.ipk --target "$GITHUB_SHA" --prerelease \
+            --title "$TITLE_R" --notes "Built automatically from the $GITHUB_REF_NAME branch at $GITHUB_SHA."

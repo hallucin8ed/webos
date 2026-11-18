@@ -28,7 +28,7 @@ static void base_id(const char *id, char out[28]) { size_t n = 0; while (id && i
 
 static Tab marks, listed, ages;   /* marks: 1 allowed, 2 blocked; ages: -1 no rating, 0.. the age, -3 asked */
 static char baseDir[1024];
-static int maxAge = 10, listsOn = 1, torrents, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60, bedExt; static time_t bedExtUntil;
+static int maxAge = 10, listsOn = 1, torrents, liveOn, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60, bedExt; static time_t bedExtUntil;
 static int hhmm(const char *s, int def) { int h, m; return s && sscanf(s, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60 ? h * 60 + m : def; }
 
 /* ---- ages on disk: "id age", appended as they are learnt ---- */
@@ -43,7 +43,7 @@ static void append(const char *path, const char *id, int v, int withVal) { FILE 
 
 void kidctl_capture(const char *dir) {
   snprintf(baseDir, sizeof baseDir, "%s", dir);
-  maxAge = atoi(store_get("pcAge", "10")); listsOn = strcmp(store_get("pcLists", "true"), "false") != 0; torrents = !strcmp(store_get("pcTorrents", "false"), "true");
+  maxAge = atoi(store_get("pcAge", "10")); listsOn = strcmp(store_get("pcLists", "true"), "false") != 0; torrents = !strcmp(store_get("pcTorrents", "false"), "true"); liveOn = !strcmp(store_get("pcLive", "false"), "true");
   bedOn = !strcmp(store_get("pcBed", "false"), "true"); bedFrom = hhmm(store_get("pcBedFrom", "19:30"), 19 * 60 + 30); bedTo = hhmm(store_get("pcBedTo", "07:00"), 7 * 60);
   bedExt = atoi(store_get("pcBedExt", "0")); bedExtUntil = (time_t)atol(store_get("pcBedExtUntil", "0"));
   if (bedExt && time(NULL) >= bedExtUntil) { bedExt = 0; store_set("pcBedExt", "0"); store_set("pcBedExtUntil", "0"); } /* last night's later bedtime is over */
@@ -51,10 +51,11 @@ void kidctl_capture(const char *dir) {
   cJSON_ArrayForEach(x, store_node("pcAllow")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_ALLOWED; }
   cJSON_ArrayForEach(x, store_node("pcBlock")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_BLOCKED; }
   char p[1100]; ages_path(p, sizeof p); load_file(&ages, p, 1); listed_path(p, sizeof p); load_file(&listed, p, 0);
-  fprintf(stderr, "[kids] rules: age limit %d, lists %s, torrents %s, bedtime %s, %d marked, %d ratings known\n", maxAge, listsOn ? "on" : "off", torrents ? "on" : "off", bedOn ? "on" : "off", marks.n, ages.n);
+  fprintf(stderr, "[kids] rules: age limit %d, lists %s, torrents %s, live TV %s, bedtime %s, %d marked, %d ratings known\n", maxAge, listsOn ? "on" : "off", torrents ? "on" : "off", liveOn ? "on" : "off", bedOn ? "on" : "off", marks.n, ages.n);
 }
 int kidctl_lists_on(void) { return listsOn; }
 int kidctl_no_torrents(void) { return profile_is_kids() && !torrents; }
+int kidctl_no_live(void) { return profile_is_kids() && !liveOn; }
 int kidctl_bedtime(char *until, size_t cap) {
   if (!bedOn || bedFrom == bedTo) return 0;
   time_t t = time(NULL); struct tm lt; localtime_r(&t, &lt); int m = lt.tm_hour * 60 + lt.tm_min;

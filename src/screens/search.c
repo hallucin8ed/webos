@@ -165,7 +165,7 @@ static void live(void) {
   if (!*p) { show(calloc(1, sizeof(Item)), 0); recent_show(); S.loading = 0; S.final = 1; S.staged = 0; results_draw_state(); return; } /* (cleared: the titles fade out where they are) */
   S.loading = 1; S.final = 0; S.staged = 1;
   sb_suggest(p, on_sug, (void *)(uintptr_t)S.tok);
-  if (strlen(p) >= 3) { char enc[200], path[400]; urlenc(p, enc, sizeof enc); snprintf(path, sizeof path, "/search/collection?query=%s&language=%s&page=1", enc, i18n_lang()); if (tmdb_request(path, on_coll, (void *)(uintptr_t)S.tok)) S.collDone = 0; }
+  if (strlen(p) >= 3 && !profile_is_kids()) { /* (Kids: no collections in search, their posters unrated) */ char enc[200], path[400]; urlenc(p, enc, sizeof enc); snprintf(path, sizeof path, "/search/collection?query=%s&language=%s&page=1", enc, i18n_lang()); if (tmdb_request(path, on_coll, (void *)(uintptr_t)S.tok)) S.collDone = 0; }
   S.catAt = app_now() + 0.5; S.catPending = 1;
 }
 static void cat_go(void) {

@@ -4,6 +4,7 @@
 #include "core/json.h"
 #include "core/net.h"
 #include "core/store.h"
+#include "core/kidctl.h"
 #include "screens/player.h"
 #include "screens/livehub.h"
 #include "screens/livepeek.h"
@@ -53,7 +54,7 @@ static void on_cat(ItemList *l, int cached, void *ud) {
   (void)cached; if (cats[i].def.skip && got) sb_catalog_page(&cats[i].def, cats[i].skip, on_page, ctok(i)); /* its next pages (the cached copy too: a fresh one comes only when it differs) */
 }
 void live_refresh(int force) {
-  static CatalogDef all[128]; static unsigned lastSig; int n = sb_home_defs(all, 128), k = 0;
+  static CatalogDef all[128]; static unsigned lastSig; int n = kidctl_no_live() ? 0 : sb_home_defs(all, 128), k = 0; /* (Kids without live TV: no channels at all) */
   unsigned sig = 2166136261u; for (int i = 0; i < n; i++) if (live_type(all[i].type)) for (const char *p = all[i].url; *p; p++) sig = (sig ^ (unsigned char)*p) * 16777619u; /* (the live catalogs the addons offer now) */
   if (!force && now_s() - catAt < 600 && sig == lastSig) return; /* (asked again every 10 minutes, or at once when the addons changed: one turned off or removed takes its channels with it) */
   lastSig = sig; catAt = now_s(); catGen++;
