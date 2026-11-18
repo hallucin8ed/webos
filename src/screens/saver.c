@@ -47,12 +47,9 @@ static struct {
    while a film plays, and while our own poster screensaver has been up for less than the handoff time (default 15 min,
    store key "ssHandoff"); after that we release, so the TV's own power saving can take over. The epoch lets the helper
    ignore a stale file if the app has gone and fall back to its own judgement. */
-static void ss_hold_update(void) {
+static void ss_hold_update(int hold) {
   static double last = 0; double now = app_now();
   if (last && now - last < 3.0) return; last = now;
-  int hold = 0;
-  if (player_open() && !player_paused()) hold = 1;                 /* a film is playing: hold, however long it runs */
-  else if (SS.on) { double mins = atof(store_get("ssHandoff", "15")); if (mins > 0 && (now - SS.startAt) / 60.0 < mins) hold = 1; }
   char path[256]; snprintf(path, sizeof path, "/tmp/%s-ss-hold", SB_APP_ID);
   FILE *f = fopen(path, "w"); if (f) { fprintf(f, "%d %ld\n", hold, (long)time(NULL)); fclose(f); }
 }
@@ -151,9 +148,16 @@ static void shift(void) {
    comes instead (read off the main thread by the TV's request: kept here each frame) */
 volatile int saver_tv_hold = 1;
 void saver_tick(float dt) {
-  double now = app_now(); saver_tv_hold = strcmp(store_get("ssDelay", "5"), "0") != 0;
-  if (SS.on) { double mins = atof(store_get("ssHandoff", "15")); if (mins > 0 && (now - SS.startAt) / 60.0 >= mins) saver_tv_hold = 0; } /* after a while of the posters, the TV's own saver and power saving take over (the helper does the same) */
-  ss_hold_update();
+  double now = app_now();
+  /* the TV's own screensaver is held off while a film plays, and, with the app's screensaver on (Settings), for as long
+     as it takes the app's to come plus the hand-over time: a paused film, a page left dimmed, the posters. Not only
+     while the posters are up: the TV asks every few minutes, and a question between a pause and the posters let the
+     TV's in over the app (seen on 1.1.1). After that the TV's own screensaver and power saving take over */
+  { double m = atof(store_get("ssDelay", "5")), h = atof(store_get("ssHandoff", "15"));
+    static double playAt; int playing = player_open() && !player_paused(); if (playing) playAt = now;
+    double idle = app_idle(); if (playAt && now - playAt < idle) idle = now - playAt; /* (a film that just ended: idle from its end, not from the last key) */
+    int hold = playing || (m > 0 && (h <= 0 || idle < (m + h) * 60));
+    saver_tv_hold = hold; ss_hold_update(hold); }
   tween_tick(&SS.fade, dt); tween_tick(&dimA, dt);
   if (dimOn && (player_open() || app_idle() < 1)) { dimOn = 0; tween_to(&dimA, 0, 0.35f, EASE_CSS_EASE); }
   if (!SS.on) {
