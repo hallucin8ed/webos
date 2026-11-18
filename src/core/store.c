@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <fcntl.h>
 #include <dirent.h>
 #include <SDL2/SDL.h>
@@ -60,9 +61,12 @@ void store_remove(const char *k) { if (find(k)) { cJSON_DeleteItemFromObjectCase
 #include <pthread.h>
 typedef struct CW { char path[1200]; unsigned char *data; size_t len; struct CW *next; } CW;
 static CW *cwHead, *cwTail; static pthread_mutex_t cwMu = PTHREAD_MUTEX_INITIALIZER; static pthread_cond_t cwCv = PTHREAD_COND_INITIALIZER; static int cwThread;
+static void cache_prune_soon(int failed);
+static int is_cache_path(const char *p);
 static void *cw_run(void *a) { plat_thread_background(15); (void)a;
   for (;;) { pthread_mutex_lock(&cwMu); while (!cwHead) pthread_cond_wait(&cwCv, &cwMu); CW *w = cwHead; cwHead = w->next; if (!cwHead) cwTail = NULL; pthread_mutex_unlock(&cwMu);
-    write_all(w->path, w->data, w->len); free(w->data); free(w); }
+    int ok = write_all(w->path, w->data, w->len), cache = is_cache_path(w->path); size_t n = w->len; free(w->data); free(w);
+    if (cache) { static long written; written += (long)n; if (!ok) { fprintf(stderr, "[cache] a write failed (the disk full?): pruning now\n"); cache_prune_soon(1); written = 0; } else if (written > cache_cap_bytes() / 8 && cache_cap_bytes() > 0) { cache_prune_soon(0); written = 0; } } } /* (kept under its cap while running, not only at start) */
   return NULL; }
 static void write_later(const char *path, unsigned char *own, size_t len) { /* own: malloc'd, taken */
   CW *w = malloc(sizeof *w); snprintf(w->path, sizeof w->path, "%s", path); w->data = own; w->len = len; w->next = NULL;
@@ -105,14 +109,21 @@ unsigned char *cache_read(const char *key, long maxAge, size_t *len) {
   if (b) { struct timespec ts[2] = { { 0, UTIME_NOW }, { 0, UTIME_OMIT } }; utimensat(AT_FDCWD, p, ts, 0); } /* last used: the access time (the change time says how fresh it is) */
   return b;
 }
+/* pictures on screen (and the ones just drawn): never pruned. The picture cache hands the names over now and then */
+static pthread_mutex_t protMu = PTHREAD_MUTEX_INITIALIZER; static char (*prot)[40]; static int nprot;
+void cache_basename(const char *key, char *out, size_t cap) { char p[1200]; cache_path(key, p, sizeof p); const char *b = strrchr(p, '/'); snprintf(out, cap, "%s", b ? b + 1 : p); }
+void cache_protect_set(const char (*names)[40], int n) { pthread_mutex_lock(&protMu); free(prot); prot = n > 0 ? malloc(sizeof *prot * (size_t)n) : NULL; nprot = prot ? n : 0; if (prot) memcpy(prot, names, sizeof *prot * (size_t)n); pthread_mutex_unlock(&protMu); }
+static int is_protected(const char *name) { const char *sl = strchr(name, '/'); if (sl) name = sl + 1; /* (on a drive: "xx/name") */ int r = 0; pthread_mutex_lock(&protMu); for (int i = 0; i < nprot && !r; i++) r = !strcmp(prot[i], name); pthread_mutex_unlock(&protMu); return r; }
 /* the cache folder is kept under a cap, the least recently used files going first (the TV's app partition has
    little room: a full one breaks installs). Run once at start, on a thread of its own */
 typedef struct { char name[40]; time_t at; long size; } CEnt;
 static int cent_cmp(const void *a, const void *b) { time_t x = ((const CEnt *)a)->at, y = ((const CEnt *)b)->at; return x < y ? -1 : x > y; }
-static long capBytes, keptBytes = -1;
+static long capBytes, askBytes, keptBytes = -1;
 long cache_cap_bytes(void) { return capBytes; }
 long cache_kept_bytes(void) { return __atomic_load_n(&keptBytes, __ATOMIC_RELAXED); }
+static pthread_mutex_t pruneMu = PTHREAD_MUTEX_INITIALIZER;
 static void *prune_run(void *a) { (void)a; plat_thread_background(15);
+  if (pthread_mutex_trylock(&pruneMu)) return NULL; /* one at a time (a drive's walk takes a while) */
   const char *u = usbRoot; char d[1100]; if (u) snprintf(d, sizeof d, "%s", u); else snprintf(d, sizeof d, "%s/cache", dir);
   int n = 0, cap = 4096; CEnt *e = malloc(cap * sizeof *e); long total = 0; struct dirent *de;
   for (int sh = u ? 0 : -1; sh < (u ? 256 : 0); sh++) { /* the one folder on the TV, the 256 on a drive */
@@ -123,14 +134,23 @@ static void *prune_run(void *a) { (void)a; plat_thread_background(15);
       if (sh < 0) snprintf(e[n].name, sizeof e[n].name, "%s", de->d_name); else snprintf(e[n].name, sizeof e[n].name, "%02x/%s", sh, de->d_name);
       e[n].at = st.st_atime > st.st_mtime ? st.st_atime : st.st_mtime; e[n].size = st.st_size; total += st.st_size; n++; }
     closedir(dd); }
-  if (total > capBytes) { qsort(e, n, sizeof *e, cent_cmp); long goal = capBytes * 3 / 4; int del = 0;
-    for (int i = 0; i < n && total > goal; i++) { char p[1200]; snprintf(p, sizeof p, "%s/%s", d, e[i].name); if (!remove(p)) { total -= e[i].size; del++; } }
+  { /* the cap, as the reference app keeps it: 15% of what the cache could take (the space free and its own), 32 MB at
+       least (a nearly full TV still keeps Home's pictures), never more than asked; the disk never left under 16 MB */
+    struct statvfs v; long long fr = -1; if (!statvfs(d, &v)) fr = (long long)v.f_bavail * (long long)v.f_frsize;
+    if (fr >= 0) { long long c = (fr + total) * 15 / 100; if (c < 32LL << 20) c = 32LL << 20; if (askBytes > 0 && c > askBytes) c = askBytes; if (fr < 16LL << 20) { long long sh = total - ((16LL << 20) - fr); c = sh < (8LL << 20) ? (8LL << 20) : sh < c ? sh : c; } capBytes = (long)c; } }
+  if (total > capBytes) { qsort(e, n, sizeof *e, cent_cmp); long goal = capBytes * 3 / 4; int del = 0, kept = 0;
+    for (int i = 0; i < n && total > goal; i++) { if (is_protected(e[i].name)) { kept++; continue; } /* (on screen: kept) */ char p[1200]; snprintf(p, sizeof p, "%s/%s", d, e[i].name); if (!remove(p)) { total -= e[i].size; del++; } }
+    if (kept) fprintf(stderr, "[cache] %d pictures on screen kept\n", kept);
     fprintf(stderr, "[cache] %d files removed, %ld KB kept\n", del, total / 1024); }
   __atomic_store_n(&keptBytes, total, __ATOMIC_RELAXED);
   if (u) { char st[1200]; snprintf(st, sizeof st, "%s/.pruned", d); FILE *f = fopen(st, "wb"); if (f) fclose(f); } /* when the drive was last tidied */
-  free(e); return NULL;
+  free(e); pthread_mutex_unlock(&pruneMu); return NULL;
 }
-void cache_prune_start(int capMb) { capBytes = (long)capMb * 1024 * 1024; pthread_t t; if (!pthread_create(&t, NULL, prune_run, NULL)) pthread_detach(t); }
+/* the cap: what was asked, and never more than a quarter of the space left (a nearly full TV keeps a small cache, never fills the disk) */
+void cache_prune_start(int capMb) { askBytes = capBytes = (long)capMb * 1024 * 1024; /* (the real cap: worked out at each prune, prune_run) */
+  { struct statvfs v; char d[1100]; const char *u = usbRoot; snprintf(d, sizeof d, "%s", u ? u : dir); if (!statvfs(d, &v)) { long long fr = (long long)v.f_bavail * (long long)v.f_frsize, q = fr * 15 / 100; if (q < 32LL << 20) q = 32LL << 20; if (q < capBytes) capBytes = (long)q; fprintf(stderr, "[cache] %lld MB free: the cache kept under %ld MB\n", fr >> 20, capBytes >> 20); } }
+  pthread_t t; if (!pthread_create(&t, NULL, prune_run, NULL)) pthread_detach(t); }
+static int is_cache_path(const char *p) { const char *u = usbRoot; return strstr(p, "/cache/") != NULL || (u && !strncmp(p, u, strlen(u))); }
 /* the cache moves to a folder on a USB drive (root), or back to the TV (NULL); capMb: the size kept there. 0: the drive
    can't be written */
 int cache_use_usb(const char *root, int capMb) {
@@ -143,9 +163,10 @@ int cache_use_usb(const char *root, int capMb) {
   /* tidied at most once a day: on a full drive that is tens of thousands of files to look at, and it would compete with
      the pictures loading after every start (and every profile switch) */
   snprintf(t, sizeof t, "%s/.pruned", root); struct stat sp;
-  if (!stat(t, &sp) && time(NULL) - sp.st_mtime < 86400) { capBytes = (long)capMb * 1024 * 1024; fprintf(stderr, "[cache] the USB drive was tidied in the last day\n"); return 1; }
+  if (!stat(t, &sp) && time(NULL) - sp.st_mtime < 86400) { askBytes = capBytes = (long)capMb * 1024 * 1024; fprintf(stderr, "[cache] the USB drive was tidied in the last day\n"); return 1; }
   cache_prune_start(capMb); return 1;
 }
+static void cache_prune_soon(int failed) { (void)failed; static Uint32 lastAt; Uint32 now = SDL_GetTicks(); if (!failed && lastAt && now - lastAt < 20000) return; lastAt = now; pthread_t t; if (capBytes > 0 && !pthread_create(&t, NULL, prune_run, NULL)) pthread_detach(t); }
 int cache_file(const char *key, long maxAge, char *p, size_t cap) {
   cache_path(key, p, cap); struct stat st; if (stat(p, &st)) return 0;
   return !(maxAge > 0 && time(NULL) - st.st_mtime > maxAge);

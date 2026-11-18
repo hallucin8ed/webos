@@ -24,6 +24,8 @@ void           cache_prune_start(int capMb);  /* the cache folder kept under cap
 long           cache_cap_bytes(void);         /* the cap given to cache_prune_start (0 before) */
 long           cache_kept_bytes(void);        /* the cache folder's size after the prune at start (-1 until it ran) */
 void           cache_write(const char *key, const unsigned char *data, size_t len);
+void           cache_basename(const char *key, char *out, size_t cap);   /* the file a key is kept in (its name only) */
+void           cache_protect_set(const char (*names)[40], int n);     /* these files are never pruned (the pictures on screen) */
 int            cache_use_usb(const char *root, int capMb); /* the cache on a USB drive's folder (NULL: back on the TV); 0 when it can't be written */
 int            cache_on_usb(void);            /* 1 while the cache is on a USB drive */
 const char    *store_data_dir(void);
