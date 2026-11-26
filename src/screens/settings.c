@@ -87,7 +87,7 @@ static const Opt SS_OPTS[] = { { "0", "Off" }, { "1", "1 min" }, { "2", "2 min" 
 static const Opt ACCENT_OPTS[] = { { "logo", "From the logo" }, { "adaptive", "From the artwork" }, { "purple", "Purple" }, { "violet", "Violet" }, { "fuchsia", "Fuchsia" }, { "pink", "Pink" }, { "rose", "Rose" }, { "red", "Red" }, { "orange", "Orange" }, { "amber", "Amber" }, { "gold", "Gold" }, { "lime", "Lime" }, { "green", "Green" }, { "emerald", "Emerald" }, { "teal", "Teal" }, { "cyan", "Cyan" }, { "sky", "Sky" }, { "blue", "Blue" }, { "indigo", "Indigo" }, { "graphite", "Graphite" } };
 #define NCAT 13
 #define MAXROWS 48
-static Setting playBase[15], playS[11], seekS[6], subsS[11], audS[4], lookS[6], langS[44], langOpt, keyS[4], traktS[6], addonS[40], acctS[1], supS[12], pcS[9], rowS[46];
+static Setting playBase[15], playS[11], seekS[6], subsS[11], audS[4], lookS[6], langS[44], langOpt, keyS[4], traktS[6], addonS[40], acctS[1], supS[12], pcS[11], rowS[46];
 static Cat cats[NCAT]; static int ncat; /* (Keys leaves when this build carries every key) */
 
 /* the layout, in the web's pixels: the grid is centred, 1600 wide, 150 from the top */
@@ -308,6 +308,9 @@ static void build(void) {
   set_s(&pcS[5], "pcBedTo", "Bedtime ends", "The rules are read when the profile screen is shown: switch profile to apply a change", PC_TO, 9, "07:00");
   set_s(&pcS[6], "pcBedExt", "Tonight: later bedtime", "Pushes tonight\xe2\x80\x99s bedtime back. It goes back to normal when bedtime ends tomorrow morning", PC_EXT, 5, "0");
   set_s(&pcS[8], "pcLive", "Kids: live TV", "Channels have no age rating: On shows every channel of the Kids account\xe2\x80\x99s live TV addons", OO, 2, "false");
+  { static char d[300]; snprintf(d, sizeof d, "Weekdays in term time: what is playing at 8:10 is the last episode, it stops at 8:25 at the latest, and the app stays locked until 9:00 (Adult needs the PIN). Term dates and bank holidays are built in up to %s", kidctl_school_until());
+    set_s(&pcS[9], "pcSchool", "Kids: school mornings", d, OO, 2, "true"); }
+  set_s(&pcS[10], "pcSchoolSkip", "Today: no school lock", "For a day off, a late start or a snow day. Back on by itself tomorrow", OO, 2, "false");
   set_s(&pcS[7], "pcPinAt", "PIN asked for", "Opening the Adult profile, or only these parental controls (then anyone can open the Adult profile)", PC_PINAT, 2, "profile");
   int nl = lang_opts(), nk = keys_opts(), na = addon_opts(), nr = row_opts();
   set_act(&acctS[0], "__logout", "Log out", ""); /* (who it is: the card above it) */
@@ -324,7 +327,7 @@ static void build(void) {
     { "Account and system", "Home rows", "set_addon", "Choose the rows on Home and Discover. Hiding one keeps its addon\xe2\x80\x99s links", NULL, rowS, nr, 0 },
     { "Account and system", "Trakt", "set_trakt", "Track what you watch", "trakt", traktS, 1, 0 },
     { "Account and system", "Keys", "set_keys", "Titles in your language, ratings and reviews", "keys", keyS, nk, 0 },
-    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 9, 0 },
+    { "Account and system", "Parental controls", "set_keys", "What the Kids profile may watch, and when", NULL, pcS, 11, 0 },
     { "Account and system", "About", "info", "Version, updates, logs and support", "about", supS, nab, 0 },
     { "", "Log out", "set_out", "", "acct", acctS, 0, 1 } }; /* (no row of its own: the category itself is the button, the page shows who is signed in) */
   ncat = 0; for (int i = 0; i < NCAT; i++) if ((c[i].opts != keyS || nk) && (c[i].opts != pcS || !profile_is_kids())) cats[ncat++] = c[i];
@@ -407,6 +410,7 @@ static void set_val(Setting *o, const char *v, int dir) {
   if (!strncmp(o->k, "adOn_", 5)) { board_invalidate(); set_count(addonS, addon_opts()); rows_refresh(); return; } /* an addon on/off here: rows, metadata and streams follow */
   if (!strcmp(o->k, "bingeWatch")) store_set("enableNextVideo", v);
   if (!strcmp(o->k, "pcBedExt")) kidctl_extend_tonight(atoi(v));
+  if (!strcmp(o->k, "pcSchoolSkip")) kidctl_skip_today(!strcmp(v, "true"));
   if (!strcmp(o->k, "p2pTcpOnly")) p2p_connections_changed();
   if (!strcmp(o->k, "accent")) accent_apply();
   /* only the row changes: a value slides in from the side pressed */

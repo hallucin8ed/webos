@@ -323,6 +323,7 @@ static int lgSeed; /* the next piece's own timing (0 capsule, 1-2 the circles, 3
 static float lgPushX, lgPushY, lgBase[4]; /* the next piece is taking up an edge push (its units; its rest shape), then none again */
 static float lg_drift_at(float ph);
 void app_clock_draw(float right, float y, float alpha) {
+  uint32_t cc = profile_is_kids() && kidctl_morning_amber() ? RGBA(255, 208, 138, 245) : WHITE_A(230); /* school mornings, 8:00 to 8:25: amber */
   static float W; static int w12 = -1; if (W <= 0 || w12 != app_clock_12()) { w12 = app_clock_12(); W = text_width(w12 ? "00:00 PM" : "00:00", 38, 600, -0.6f); } /* (the pill as wide as the format's longest time) */ float x0 = right - W; if (alpha < 1) gfx_opacity_push(alpha);
   { float ph = 76, pw = W + 52, px = x0 - 26, py = y + text_line_height(38) / 2 - ph / 2; /* a glass pill behind it, the bar's circles' sister */
     if (clockLiquid) { lgSeed = 3; lg_glass(px, py, pw, ph, ph / 2, ACC, 0.85f); } else { lglass_light(lg_drift_at(113.0f)); lglass_shell(px, py, pw, ph, ph / 2, RGBA(14, 14, 22, 120), 0.85f); } lglass_light(0); }
@@ -330,10 +331,10 @@ void app_clock_draw(float right, float y, float alpha) {
   float k = clockAnim.on ? ease_apply(EASE_IN_OUT, timer_x(&clockAnim)) : 1;
   size_t n = 0; if (k < 1) while (clockTxt[n] && clockTxt[n] == clockOld[n]) n++; else n = strlen(clockTxt);
   char pre[8]; snprintf(pre, sizeof pre, "%.*s", (int)n, clockTxt); float pw = n ? text_width(pre, 38, 600, -0.6f) : 0;
-  if (n) text_draw(pre, x0, y, 38, 600, WHITE_A(230), -0.6f, 0, ALIGN_LEFT);
+  if (n) text_draw(pre, x0, y, 38, 600, cc, -0.6f, 0, ALIGN_LEFT);
   if (k < 1) {
-    gfx_opacity_push(1 - k); text_draw(clockOld + n, x0 + pw, y - 5 * k, 38, 600, WHITE_A(230), -0.6f, 0, ALIGN_LEFT); gfx_opacity_pop();
-    gfx_opacity_push(k); text_draw(clockTxt + n, x0 + pw, y + 5 * (1 - k), 38, 600, WHITE_A(230), -0.6f, 0, ALIGN_LEFT); gfx_opacity_pop(); }
+    gfx_opacity_push(1 - k); text_draw(clockOld + n, x0 + pw, y - 5 * k, 38, 600, cc, -0.6f, 0, ALIGN_LEFT); gfx_opacity_pop();
+    gfx_opacity_push(k); text_draw(clockTxt + n, x0 + pw, y + 5 * (1 - k), 38, 600, cc, -0.6f, 0, ALIGN_LEFT); gfx_opacity_pop(); }
   if (alpha < 1) gfx_opacity_pop();
 }
 static void clock_draw(void) { float W = text_width("00:00", 38, 600, -0.6f); clockLiquid = 1; app_clock_draw(app_rtl() ? 48 + W : SB_W - 48, 50 - 22, 1); clockLiquid = 0; }

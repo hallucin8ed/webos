@@ -9,10 +9,15 @@
 #include "platform/plat.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <math.h>
 
-enum { M_PICK, M_UNLOCK, M_CREATE, M_CONFIRM, M_OLD };
+#ifndef SB_APP_ID
+#define SB_APP_ID "tv.stremioorigin.app"
+#endif
+enum { M_PICK, M_UNLOCK, M_CREATE, M_CONFIRM, M_OLD, M_MORNING };
 static int gVerify; /* the PIN asked for the Parental controls (Back goes back to Settings) */
-static struct { char bed[8]; Uint32 bedAt; int mode, pick, pad, n, wrong, fresh; char pin[5], first[5]; const char *msg; Uint32 lockUntil, msgAt; } G;
+static struct { char bed[8]; Uint32 bedAt, schoolAt; int adultPin; int mode, pick, pad, n, wrong, fresh; char pin[5], first[5]; const char *msg; Uint32 lockUntil, msgAt; } G;
 
 /* the pad: 1 2 3 / 4 5 6 / 7 8 9 / delete 0 */
 #define PAD_N 11
@@ -28,7 +33,7 @@ static int pin_key(int d) {
   if (G.n < 4) { G.pin[G.n++] = (char)('0' + d); G.pin[G.n] = 0; }
   if (G.n < 4) return 0;
   if (G.mode == M_UNLOCK || G.mode == M_OLD) {
-    if (profile_pin_ok(G.pin)) { G.wrong = 0; pin_clear(); G.msg = NULL; if (G.mode == M_OLD) { G.mode = M_CREATE; return 0; } return 1; }
+    if (profile_pin_ok(G.pin)) { G.wrong = 0; pin_clear(); G.msg = NULL; if (G.mode == M_UNLOCK) kidctl_adult_pinned(1); if (G.mode == M_OLD) { G.mode = M_CREATE; return 0; } return 1; }
     pin_clear();
     if (++G.wrong >= 3) { G.wrong = 0; G.lockUntil = SDL_GetTicks() + 30000; say("Too many tries. Wait half a minute"); fprintf(stderr, "[profile] three wrong PINs: locked for 30 s\n"); }
     else say("That\xe2\x80\x99s not the PIN");
@@ -48,14 +53,30 @@ static void draw_tile(float x, float y, float s, const char *letter, const char 
   text_draw(name, x + s / 2, y + s + 26, 40, 700, WHITE_A(on ? 255 : 170), 0, s + 80, ALIGN_CENTER);
   if (note) text_draw(note, x + s / 2, y + s + 26 + text_line_height(40) + 4, 24, 400, WHITE_A(130), 0, s + 120, ALIGN_CENTER);
 }
+/* the school-morning lock: a dim clock on black (an OLED's black is off), moved every minute so nothing burns in */
+static void hold_tv_saver(int hold) { /* the root helper keeps LG's screensaver off while this clock shows */
+  static Uint32 at; if (at && SDL_GetTicks() - at < 3000) return; at = SDL_GetTicks() | 1;
+  char path[256]; snprintf(path, sizeof path, "/tmp/%s-ss-hold", SB_APP_ID); FILE *f = fopen(path, "w"); if (f) { fprintf(f, "%d %ld\n", hold, (long)time(NULL)); fclose(f); } }
+static void draw_morning(void) {
+  gfx_rect(0, 0, SB_W, SB_H, RGB(0, 0, 0));
+  time_t t = time(NULL); struct tm lt; localtime_r(&t, &lt); char hm[16]; snprintf(hm, sizeof hm, "%02d:%02d", lt.tm_hour, lt.tm_min);
+  unsigned r = (unsigned)(t / 60) * 2654435761u; float bw = 700, bh = 360; /* the block, placed afresh each minute */
+  float x = 120 + (float)(r % 1000) / 1000.0f * (SB_W - 240 - bw), y = 90 + (float)((r >> 12) % 1000) / 1000.0f * (SB_H - 180 - bh), cx = x + bw / 2;
+  text_draw(hm, cx, y, 220, 200, WHITE_A(115), 0, 0, ALIGN_CENTER);
+  float y2 = y + text_line_height(220) + 18;
+  text_draw(T("Have a good day at school"), cx, y2, 32, 400, WHITE_A(86), 0, 0, ALIGN_CENTER);
+  text_draw(T("Back on at 9:00 \xc2\xb7 OK and the PIN opens Adult"), cx, y2 + text_line_height(32) + 14, 22, 400, WHITE_A(64), 0, 0, ALIGN_CENTER);
+}
 static void draw(void) {
   float cx = SB_W / 2;
+  if (G.mode == M_MORNING) { draw_morning(); return; }
   if (G.mode == M_PICK) {
     text_draw(T("Who\xe2\x80\x99s watching?"), cx, 170, 64, 700, WHITE_A(255), -0.5f, 0, ALIGN_CENTER);
     float s = 330, gap = 110, x0 = cx - s - gap / 2, y = 360;
-    draw_tile(x0, y, s, "A", T("Adult"), profile_pin_at_settings() ? NULL : T("PIN needed"), G.pick == 0, RGB(74, 62, 140));
+    draw_tile(x0, y, s, "A", T("Adult"), profile_pin_at_settings() && kidctl_morning() < KM_LAST ? NULL : T("PIN needed"), G.pick == 0, RGB(74, 62, 140));
     draw_tile(x0 + s + gap, y, s, "K", T("Kids"), NULL, G.pick == 1, RGB(36, 122, 88));
-    if (G.bedAt && SDL_GetTicks() - G.bedAt < 6000) text_draw(T1("It\xe2\x80\x99s bedtime. Kids opens again at {t}", "t", G.bed), cx, 880, 30, 600, RGB(255, 200, 120), 0, 0, ALIGN_CENTER);
+    if (G.schoolAt && SDL_GetTicks() - G.schoolAt < 6000) text_draw(T("School morning. Kids opens again at 9:00"), cx, 880, 30, 600, RGB(255, 200, 120), 0, 0, ALIGN_CENTER);
+    else if (G.bedAt && SDL_GetTicks() - G.bedAt < 6000) text_draw(T1("It\xe2\x80\x99s bedtime. Kids opens again at {t}", "t", G.bed), cx, 880, 30, 600, RGB(255, 200, 120), 0, 0, ALIGN_CENTER);
     text_draw(T("Left / Right to choose, OK to open. Back closes the app"), cx, 960, 24, 400, WHITE_A(120), 0, 0, ALIGN_CENTER);
     return;
   }
@@ -98,10 +119,16 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
       if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) { int dw, dh; SDL_GL_GetDrawableSize(win, &dw, &dh); gfx_resize(dw, dh); }
       if (e.type != SDL_KEYDOWN) continue;
       int k = plat_map_key(&e.key), d = digit_of(&e.key.keysym);
+      if (G.mode == M_MORNING) {
+        if (k == K_BACK || k == K_EXIT) return -1;
+        if (k == K_OK) { G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; G.adultPin = 1; }
+        continue;
+      }
       if (G.mode == M_PICK) {
         if (k == K_LEFT) G.pick = 0; else if (k == K_RIGHT) G.pick = 1;
         else if (k == K_BACK || k == K_EXIT) return -1;
-        else if (k == K_OK) { if (G.pick == 1) { if (kidctl_bedtime(G.bed, sizeof G.bed)) { G.bedAt = SDL_GetTicks() | 1; continue; } return 1; } if (G.fresh || profile_pin_at_settings()) return 0; G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; }
+        else if (k == K_OK) { if (G.pick == 1) { if (kidctl_morning() >= KM_LAST) { G.schoolAt = SDL_GetTicks() | 1; continue; } if (kidctl_bedtime(G.bed, sizeof G.bed)) { G.bedAt = SDL_GetTicks() | 1; continue; } return 1; }
+          if (G.fresh) { kidctl_adult_pinned(1); return 0; } if (profile_pin_at_settings() && kidctl_morning() < KM_LAST) return 0; G.mode = M_UNLOCK; G.pad = 4; pin_clear(); G.msg = NULL; }
         continue;
       }
       int done = 0;
@@ -112,6 +139,7 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
         if (G.n) pin_clear();
         else if (G.mode == M_CONFIRM) { G.mode = M_CREATE; G.msg = NULL; }
         else if (gVerify) return -2;
+        else if (G.mode == M_UNLOCK && G.adultPin && kidctl_morning() >= KM_LAST) { G.mode = M_MORNING; G.msg = NULL; G.adultPin = 0; }
         else if (G.mode == M_UNLOCK && pickFirst) { G.mode = M_PICK; G.msg = NULL; }
         else if (startMode == M_OLD) return -2;
         else if (G.mode == M_UNLOCK || k == K_EXIT) return -1;
@@ -122,6 +150,8 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
         return 0;
       }
     }
+    if (G.mode == M_MORNING && kidctl_morning() < KM_LAST) G.mode = M_PICK; /* 9:00: the usual profile screen */
+    hold_tv_saver(G.mode == M_MORNING);
     text_frame_begin();
     gfx_begin(PAGE);
     draw();
@@ -130,7 +160,7 @@ static int run(SDL_Window *win, int mode, int pickFirst) {
     SDL_Delay(16);
   }
 }
-int gate_start(SDL_Window *win) { return run(win, profile_has_pin() ? M_PICK : M_CREATE, 1); }
+int gate_start(SDL_Window *win) { return run(win, !profile_has_pin() ? M_CREATE : kidctl_morning() >= KM_LAST ? M_MORNING : M_PICK, 1); }
 int gate_relock(SDL_Window *win) { int r = run(win, M_UNLOCK, 0); return r == 0 ? 1 : -1; }
 void gate_change_pin(SDL_Window *win) { run(win, M_OLD, 0); }
 int gate_verify(SDL_Window *win) { gVerify = 1; int r = run(win, M_UNLOCK, 0); gVerify = 0; return r == 0; }

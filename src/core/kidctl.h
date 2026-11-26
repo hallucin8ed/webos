@@ -18,6 +18,17 @@ int  kidctl_bedtime(char *until, size_t cap); /* 1: it is bedtime now (until: "0
 void kidctl_tick(void);                      /* once a frame: the rating lookups */
 void kidctl_extend_tonight(int minutes);     /* Settings: tonight's bedtime this much later (0: as usual) */
 unsigned kidctl_gen(void);                   /* changes whenever new ratings have arrived */
+/* school mornings (weekdays in the built-in term dates, not on a bank holiday or a day skipped): the clock shows until
+   8:10; then what is playing is the last, nothing new starts, and at 8:25 (or when it ends) the app locks until 9:00.
+   Kids only, except that the Adult profile needs the PIN while it is locked */
+enum { KM_NONE, KM_CLOCK, KM_LAST, KM_LOCK };
+int  kidctl_morning(void);                    /* the phase now (KM_NONE: not a school morning, or after 9:00) */
+int  kidctl_morning_amber(void);              /* 8:00 to 8:25: the clock warns */
+int  kidctl_morning_left(void);               /* minutes to 8:10 (8:00 to 8:10) */
+void kidctl_skip_today(int on);               /* Settings: no school lock today (the Adult PIN behind it) */
+const char *kidctl_school_until(void);        /* "16 Jul 2027": the last day the built-in dates know */
+void kidctl_adult_pinned(int on);             /* the Adult profile was opened with the PIN (then the lock lets it be) */
+int  kidctl_adult_is_pinned(void);
 /* the Adult profile: a title's mark */
 enum { KID_RULE = 0, KID_ALLOWED = 1, KID_BLOCKED = 2 };
 int  kidctl_mark(const char *id);

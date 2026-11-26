@@ -345,11 +345,16 @@ int main(int argc, char **argv) {
       else if (e.type == SDL_WINDOWEVENT && e.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) { SDL_GL_GetDrawableSize(win, &dw, &dh); gfx_resize(dw, dh); }
     }
     /* the Adult profile, back after a while away: its PIN again; a PIN change asked in Settings */
-    if (profile_relock_due()) { if (gate_relock(win) < 0) { fprintf(stderr, "[exit] closed at the PIN\n"); app_quit(); } last = SDL_GetTicks(); }
+    if (profile_relock_due()) { if (gate_relock(win) < 0) { fprintf(stderr, "[exit] closed at the PIN\n"); app_quit(); } else kidctl_adult_pinned(1); last = SDL_GetTicks(); }
     { int ask = profile_asked(); if (ask == PROFILE_ASK_PIN) { gate_change_pin(win); last = SDL_GetTicks(); }
       else if (ask == PROFILE_ASK_UNLOCK) { if (gate_verify(win)) profile_pc_unlock(); last = SDL_GetTicks(); }
       else if (ask == PROFILE_ASK_SWITCH) { fprintf(stderr, "[profile] back to the profile screen\n"); again = 1; app_quit(); } }
     { static Uint32 bedAt; if (profile_is_kids() && SDL_GetTicks() - bedAt > 20000) { bedAt = SDL_GetTicks(); if (kidctl_bedtime(NULL, 0)) { fprintf(stderr, "[kids] bedtime\n"); again = 1; app_quit(); } } }
+    /* school mornings: Kids locks at 8:25, or as soon as the last episode (the one playing at 8:10) is no longer
+       playing; the Adult profile, opened without the PIN, locks at 8:10 */
+    { static Uint32 mAt; if (SDL_GetTicks() - mAt > 1000) { mAt = SDL_GetTicks(); int ph = kidctl_morning();
+        if (profile_is_kids() ? (ph == KM_LOCK || (ph == KM_LAST && !player_open())) : (ph >= KM_LAST && !kidctl_adult_is_pinned())) {
+          fprintf(stderr, "[kids] school morning: locked until 9:00\n"); again = 1; app_quit(); } } }
     kidctl_tick();
     cache_place();
     Uint32 now = SDL_GetTicks(); float dt = (now - last) / 1000.0f, dtReal = dt; last = now; /* (dtReal: behind another app, the time as it went: #69) */

@@ -29,6 +29,7 @@ static void base_id(const char *id, char out[28]) { size_t n = 0; while (id && i
 static Tab marks, listed, ages;   /* marks: 1 allowed, 2 blocked; ages: -1 no rating, 0.. the age, -3 asked */
 static char baseDir[1024];
 static int maxAge = 10, listsOn = 1, torrents, liveOn, bedOn, bedFrom = 19 * 60 + 30, bedTo = 7 * 60, bedExt; static time_t bedExtUntil;
+static int schoolOn = 1, skipYmd, adultPinned; static int ymd_now(int *mins, int *wday);
 static int hhmm(const char *s, int def) { int h, m; return s && sscanf(s, "%d:%d", &h, &m) == 2 && h >= 0 && h < 24 && m >= 0 && m < 60 ? h * 60 + m : def; }
 
 /* ---- ages on disk: "id age", appended as they are learnt ---- */
@@ -47,12 +48,42 @@ void kidctl_capture(const char *dir) {
   bedOn = !strcmp(store_get("pcBed", "false"), "true"); bedFrom = hhmm(store_get("pcBedFrom", "19:30"), 19 * 60 + 30); bedTo = hhmm(store_get("pcBedTo", "07:00"), 7 * 60);
   bedExt = atoi(store_get("pcBedExt", "0")); bedExtUntil = (time_t)atol(store_get("pcBedExtUntil", "0"));
   if (bedExt && time(NULL) >= bedExtUntil) { bedExt = 0; store_set("pcBedExt", "0"); store_set("pcBedExtUntil", "0"); } /* last night's later bedtime is over */
+  schoolOn = strcmp(store_get("pcSchool", "true"), "false") != 0; skipYmd = atoi(store_get("pcSchoolSkipDay", "0"));
+  if (skipYmd && skipYmd != ymd_now(NULL, NULL)) { skipYmd = 0; store_set("pcSchoolSkipDay", "0"); store_set("pcSchoolSkip", "false"); } /* yesterday's skip is over */
   const cJSON *x; char b[28];
   cJSON_ArrayForEach(x, store_node("pcAllow")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_ALLOWED; }
   cJSON_ArrayForEach(x, store_node("pcBlock")) if (cJSON_IsString(x)) { base_id(x->valuestring, b); Ent *e = tab_at(&marks, b, 1); if (e) e->v = KID_BLOCKED; }
   char p[1100]; ages_path(p, sizeof p); load_file(&ages, p, 1); listed_path(p, sizeof p); load_file(&listed, p, 0);
-  fprintf(stderr, "[kids] rules: age limit %d, lists %s, torrents %s, live TV %s, bedtime %s, %d marked, %d ratings known\n", maxAge, listsOn ? "on" : "off", torrents ? "on" : "off", liveOn ? "on" : "off", bedOn ? "on" : "off", marks.n, ages.n);
+  fprintf(stderr, "[kids] rules: age limit %d, lists %s, torrents %s, live TV %s, bedtime %s, school mornings %s, %d marked, %d ratings known\n", maxAge, listsOn ? "on" : "off", torrents ? "on" : "off", liveOn ? "on" : "off", bedOn ? "on" : "off", schoolOn ? (skipYmd ? "skipped today" : "on") : "off", marks.n, ages.n);
 }
+/* ---- school mornings -------------------------------------------------------------------------------------------
+   The school's term dates (its calendar for 2026-27), and England's bank holidays (GOV.UK, 2026-27). Every weekday in a
+   term that is not a closure is a school morning. Next year's dates: add them here */
+static const struct { int from, to; } TERMS[] = {
+  { 20260902, 20261023 }, { 20261102, 20261218 }, { 20270104, 20270212 }, { 20270222, 20270325 }, { 20270412, 20270528 }, { 20270607, 20270716 } };
+static const int CLOSED[] = { 20260901, 20270506, 20270719, 20270720, /* INSET days */
+  20260101, 20260403, 20260406, 20260504, 20260525, 20260831, 20261225, 20261228, /* bank holidays */
+  20270101, 20270326, 20270329, 20270503, 20270531, 20270830, 20271227, 20271228 };
+#define M_READY (8 * 60 + 10)
+#define M_STOP  (8 * 60 + 25)
+#define M_UNTIL (9 * 60)
+static int ymd_now(int *mins, int *wday) { time_t t = time(NULL); struct tm lt; localtime_r(&t, &lt); if (mins) *mins = lt.tm_hour * 60 + lt.tm_min; if (wday) *wday = lt.tm_wday; return (lt.tm_year + 1900) * 10000 + (lt.tm_mon + 1) * 100 + lt.tm_mday; }
+static int school_day(int ymd, int wday) {
+  if (wday == 0 || wday == 6) return 0;
+  for (size_t i = 0; i < sizeof CLOSED / sizeof *CLOSED; i++) if (CLOSED[i] == ymd) return 0;
+  for (size_t i = 0; i < sizeof TERMS / sizeof *TERMS; i++) if (ymd >= TERMS[i].from && ymd <= TERMS[i].to) return 1;
+  return 0; }
+static int morning_mins(void) { /* the minute of a school morning before 9:00, or -1 */
+  if (!schoolOn) return -1; int m, w, d = ymd_now(&m, &w);
+  if (d == skipYmd || m >= M_UNTIL || !school_day(d, w)) return -1; return m; }
+int kidctl_morning(void) { int m = morning_mins(); return m < 0 ? KM_NONE : m < M_READY ? KM_CLOCK : m < M_STOP ? KM_LAST : KM_LOCK; }
+int kidctl_morning_amber(void) { int m = morning_mins(); return m >= M_READY - 10 && m < M_STOP; }
+int kidctl_morning_left(void) { int m = morning_mins(); return m < 0 ? 0 : M_READY - m; }
+void kidctl_skip_today(int on) { skipYmd = on ? ymd_now(NULL, NULL) : 0; char b[16]; snprintf(b, sizeof b, "%d", skipYmd); store_set("pcSchoolSkipDay", b); fprintf(stderr, "[kids] school lock %s today\n", on ? "skipped" : "back on"); }
+const char *kidctl_school_until(void) { static char s[24]; int d = TERMS[sizeof TERMS / sizeof *TERMS - 1].to; static const char *M[] = { "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec" }; snprintf(s, sizeof s, "%d %s %d", d % 100, M[(d / 100) % 100 - 1], d / 10000); return s; }
+void kidctl_adult_pinned(int on) { adultPinned = on; }
+int kidctl_adult_is_pinned(void) { return adultPinned; }
+
 int kidctl_lists_on(void) { return listsOn; }
 int kidctl_no_torrents(void) { return profile_is_kids() && !torrents; }
 int kidctl_no_live(void) { return profile_is_kids() && !liveOn; }

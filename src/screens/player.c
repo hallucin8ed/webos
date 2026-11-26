@@ -1,4 +1,5 @@
 #include "core/kidctl.h"
+#include "core/profile.h"
 #include "screens/player.h"
 #include "core/traktwatch.h"
 #include "screens/board.h"
@@ -114,7 +115,7 @@ static struct {
   int open, closing, live, failed, started; double openedAt;
   char type[16], id[SB_ID], vid[SB_VID], name[256], logo[512], bg[512], poster[512], sname[600], saddon[96], url[SB_URL_MAX], alt[SB_URL_MAX]; int altTried, p2pRetried; double lastPos; int quiet, adopt, isTrailer, isHls, liveStream, hlsVod; /* liveStream: its HLS playlist has no end (a live broadcast); hlsVod: it has an end (a replay) */
   cJSON *meta; const cJSON *videos; int season, episode; char epTitle[256], year[8], genre[64];
-  struct { int has; char vid[SB_VID], se[32], title[256], thumb[512], ov[600]; } next; char upto[SB_VID]; /* a file of two episodes or more: the last it holds */ int sim; double startAt;
+  struct { int has; char vid[SB_VID], se[32], title[256], thumb[512], ov[600]; } next; char upto[SB_VID]; /* a file of two episodes or more: the last it holds */ double lastEpAt; /* when 8:10 made this the last episode */ int sim; double startAt;
   struct { int has, tried; double at; char id[16], name[160], poster[400], bg[400], part[64]; } coll; /* a film in a collection: the next one */
   int mode; /* 0 video 1 osd 2 tray 3 prompt */ int row; /* 0 btns 1 bar */ int bIdx;
   struct { const char *id; const char *icon; char lb[48]; int big, nx; float x0, x, y, w, lw; Mo dx; } btns[MAXBTN]; int nbtn, nL;
@@ -2515,6 +2516,14 @@ void player_tick(float dt) {
   if (vs == VID_ERROR && !P.failed && P.started && live_reload("stream error")) vs = video_state();
   if (vs == VID_ERROR && !P.failed && P.started) { if (P.alt[0] && !P.altTried) { P.altTried = 1; fprintf(stderr, "[player] error, the fallback URL\n"); video_load(P.alt); } else { if (!P.errAt) P.errAt = now_(); if (!P.sizeTok || P.sizeAns || now_() - P.errAt > 4) fail(fail_reason()); } } /* the first URL failed: the same file the other way; the reason waits for the server's answer (4 s at most) */
   if (P.nx.tok && !P.nx.done && now_() >= P.nx.until) nx_finish();
+  /* a school morning (Kids): from 8:10 what is playing is the last: no next episode, film or similar, and another
+     episode picked in here locks the app (main.c locks it once this one is no longer playing, or at 8:25) */
+  { static char lastVid[SB_VID]; static double at;
+    if (profile_is_kids() && kidctl_morning() == KM_LAST) {
+      P.next.has = 0; P.coll.has = 0; P.sim = 0; if (P.prompt.k == 3) P.prompt.autoN = 0;
+      if (!lastVid[0]) { snprintf(lastVid, sizeof lastVid, "%s", P.vid); P.lastEpAt = now_(); fprintf(stderr, "[kids] school morning: %s is the last episode\n", P.vid); }
+      else if (strcmp(lastVid, P.vid) && now_() - at > 2) { at = now_(); profile_ask(PROFILE_ASK_SWITCH); } }
+    else lastVid[0] = 0; }
   if (P.metaRetryAt && now_() >= P.metaRetryAt) { P.metaRetryAt = 0; if (!P.next.has || !P.videos) ask_meta(); }
   if (P.extRetryAt && now_() >= P.extRetryAt) { P.extRetryAt = 0; load_ext_subs(P.extTry + 1); }
   if (P.adxRetryAt && now_() >= P.adxRetryAt) { P.adxRetryAt = 0; load_addon_subs(P.adxTry + 1); }
@@ -2863,6 +2872,13 @@ static void draw_osd(void) {
     lglass_shell(72, 52, w, 46, 23, RGBA(10, 12, 22, 150), 1); gfx_circle(72 + 2 + 16 + 5, 52 + 23, 5, RGB(0x4a, 0xde, 0x80));
     xline_draw(&stX[2], P.p2pLine, 72 + 2 + 16 + 10 + 12, 52 + (46 - text_line_height(24)) / 2, 24, WHITE_A(255), 0, ALIGN_LEFT); gfx_opacity_pop(); }
   /* top right: the clock, the pages' own (a new minute: only its changed digits crossfade), and when it ends */
+  int kidAm = profile_is_kids() && kidctl_morning() >= KM_CLOCK && kidctl_morning() <= KM_LAST; /* a school morning: the clock stays up */
+  if (kidAm && P.topR.v < 0.999f) app_clock_draw(W - 64, 46, 1 - P.topR.v);
+  if (kidAm && kidctl_morning() == KM_LAST && (now_() - P.lastEpAt < 12 || P.topR.v > 0.5f)) { /* "Last episode": for a while at 8:10, and with the controls */
+    const char *a = T("Last episode"), *b = T("Time to get ready for school when this one ends"); float w = fmaxf(text_width(a, 36, 700, 0), text_width(b, 24, 400, 0)) + 80, h = 116, x = W / 2 - w / 2;
+    lglass_shell(x, 48, w, h, 20, RGBA(10, 12, 16, 190), 1); text_draw(a, W / 2, 48 + 18, 36, 700, WHITE_A(255), 0, 0, ALIGN_CENTER); text_draw(b, W / 2, 48 + 18 + text_line_height(36) + 6, 24, 400, RGBA(201, 208, 220, 255), 0, 0, ALIGN_CENTER); }
+  else if (kidAm && kidctl_morning_amber() && P.topR.v < 0.5f) { char m[64], n[8]; /* 8:00 to 8:10: under the clock */ snprintf(n, sizeof n, "%d", kidctl_morning_left()); snprintf(m, sizeof m, "%s", T1("{n} min until getting ready", "n", n));
+    txt_sh(m, W - 64, 46 + text_line_height(38) / 2 + 38 + 14, 22, 600, RGBA(255, 208, 138, 235), 0, 0, ALIGN_RIGHT, 128); }
   if (P.topR.v > 0.001f) { gfx_opacity_push(P.topR.v); gfx_offset_push(0, P.topY.v);
     app_clock_draw(W - 64, 46, 1);
     double d = dur(); if (d > 0 && !live_bcast()) { time_t t = time(NULL) + (time_t)(d - video_time()); /* (live: nothing ends) */
